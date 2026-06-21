@@ -1,0 +1,62 @@
+# Secrets
+.env
+.env.local
+.env.*.local
+*.env
+!.env.example
+
+# Python
+__pycache__/
+.venv/
+venv/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Media / generated artifacts (keep test fixtures)
+*.mp4
+*.wav
+*.mkv
+*.webm
+*.ass
+*.srt
+*.vtt
+!tests/fixtures/**
+data/
+tmp/
+
+# result/ — disposable HTML viewer (regenerate via generate_report.py); keep durable data
+result/view.html
+!result/data/
+!result/data/channels.json
+# result/axen/poc/ — generated PoC media (regenerate via tools/studio_poc.py); keep code, not output
+result/axen/poc/
+# generated script/thumbnail output + generated images (regenerate via tools/) — keep code, not output
+result/axen/scripts/
+result/axen/thumbs/
+assets/generated/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+logs/
+.claude/checkpoints.log
+
+# Local tooling artifacts + scratch screenshots (not part of the project)
+.playwright-mcp/
+/dashboard-dark.png
+/dashboard-light.png
+
+# competitor style-reference frames (study only — not committed)
+result/axen/style_refs/
+# extracted reference-video frames (study only — heavy, not committed)
+assets/refs/frame_*.jpg

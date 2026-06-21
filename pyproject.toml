@@ -1,0 +1,31 @@
+[project]
+name = "faceless-ai-history"
+version = "0.1.0"
+description = "Faceless AI history video pipeline — Tier-0 PoC (script → AI images → FFmpeg Ken-Burns → narration → assemble)"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2",
+    "pillow>=10",         # PoC placeholder images / caption overlays
+    "httpx>=0.27",        # Cartesia TTS + Gemini image API
+    "python-dotenv>=1.0", # load .env (GEMINI_API_KEY, CARTESIA_*)
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.2",
+    "ruff>=0.6",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["result"]  # one-off research/report generators, not product code
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
