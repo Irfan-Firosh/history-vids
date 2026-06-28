@@ -10,8 +10,22 @@ ffmpeg) live in `tools/studio_poc.py` behind the Protocols here, so they swap fr
 from __future__ import annotations
 
 from studio.kenburns import MOTIONS, scene_filter
+from studio.types import (
+    SHOT_TYPES,
+    ImageProvider,
+    Scene,
+    Storyboard,
+    VoiceProvider,
+    shot_uses_character,
+)
 
 __all__ = [
+    "Scene",
+    "Storyboard",
+    "ImageProvider",
+    "VoiceProvider",
     "MOTIONS",
     "scene_filter",
+    "SHOT_TYPES",
+    "shot_uses_character",
 ]
