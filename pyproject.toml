@@ -8,6 +8,7 @@ dependencies = [
     "pillow>=10",         # PoC placeholder images / caption overlays
     "httpx>=0.27",        # Cartesia TTS + Gemini image API
     "python-dotenv>=1.0", # load .env (GEMINI_API_KEY, CARTESIA_*)
+    "matplotlib>=3.8",    # research report generators in result/
 ]
 
 [dependency-groups]
