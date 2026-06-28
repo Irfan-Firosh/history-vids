@@ -30,3 +30,4 @@ extend-exclude = ["result"]  # one-off research/report generators, not product c
 select = ["E", "F", "I", "UP", "B"]
 
 [tool.ruff.lint.per-file-ignores]
+"tools/studio_poc.py" = ["E402", "E501"]   # sys.path bootstrap; long provider strings/docstrings
