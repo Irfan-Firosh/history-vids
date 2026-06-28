@@ -10,6 +10,7 @@ ffmpeg) live in `tools/studio_poc.py` behind the Protocols here, so they swap fr
 from __future__ import annotations
 
 from studio.kenburns import MOTIONS, scene_filter
+from studio.storyboard import DEMO_STORYBOARD
 from studio.style import CONCEPT_STYLE, LOCKED_STYLE, styled_prompt
 from studio.types import (
     SHOT_TYPES,
@@ -30,6 +31,7 @@ __all__ = [
     "styled_prompt",
     "MOTIONS",
     "scene_filter",
+    "DEMO_STORYBOARD",
     "SHOT_TYPES",
     "shot_uses_character",
 ]
