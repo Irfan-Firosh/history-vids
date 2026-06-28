@@ -4,9 +4,25 @@ from __future__ import annotations
 
 
 import pytest
+from pydantic import ValidationError
 
-from studio import scene_filter
+from studio import DEMO_STORYBOARD, scene_filter
 from studio.kenburns import MOTIONS, motion_for_index
+from studio.style import LOCKED_STYLE, styled_prompt
+from studio.types import Scene, Storyboard, shot_uses_character
+
+
+# ── style ─────────────────────────────────────────────────────────────────────
+def test_styled_prompt_appends_locked_style():
+    out = styled_prompt("a cave at dawn")
+    assert out.startswith("a cave at dawn")
+    assert LOCKED_STYLE in out  # every image shares one style → consistency
+
+
+def test_styled_prompt_is_stable_across_scenes():
+    a = styled_prompt("scene one")
+    b = styled_prompt("scene two")
+    assert a.removeprefix("scene one") == b.removeprefix("scene two")  # identical style tail
 
 
 # ── scene filter (static hard-cut default; optional Ken-Burns) ─────────────────
@@ -41,3 +57,38 @@ def test_motion_rotation_cycles():
 
 def test_frames_never_zero():
     assert "d=1" in scene_filter("zoom_in", duration_sec=0.0, fps=30)
+
+
+# ── storyboard ────────────────────────────────────────────────────────────────
+def test_demo_storyboard_is_well_formed():
+    sb = DEMO_STORYBOARD
+    assert isinstance(sb, Storyboard) and len(sb.scenes) >= 4
+    assert all(isinstance(s, Scene) and s.narration and s.image_prompt for s in sb.scenes)
+    assert all(s.motion == "static" or s.motion in MOTIONS for s in sb.scenes)
+    assert sb.style == LOCKED_STYLE
+
+
+def test_scene_is_frozen():
+    s = DEMO_STORYBOARD.scenes[0]
+    with pytest.raises(ValidationError):
+        s.narration = "mutated"  # type: ignore[misc]
+
+
+# ── shot types (drive reference conditioning) ──────────────────────────────────
+def test_scene_defaults_to_character_shot():
+    assert Scene(narration="a", image_prompt="b").shot_type == "character"
+
+
+def test_shot_uses_character_only_for_character_and_wide():
+    assert shot_uses_character("character") and shot_uses_character("wide")
+    assert not shot_uses_character("concept") and not shot_uses_character("map")
+
+
+def test_invalid_shot_type_is_rejected():
+    with pytest.raises(ValidationError):
+        Scene(narration="a", image_prompt="b", shot_type="banana")  # type: ignore[arg-type]
+
+
+def test_demo_storyboard_tags_every_scene_with_a_valid_shot():
+    valid = ("character", "wide", "concept", "map")
+    assert all(s.shot_type in valid for s in DEMO_STORYBOARD.scenes)
