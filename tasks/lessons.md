@@ -1,5 +1,16 @@
 # Lessons
 
+## 2026-06-27 — Separate shared infra from domain logic when scoping a pivot
+**Correction:** When proposing the Shorts pivot (D2), I framed it as "reuse ~70% of the engine,"
+which lumped *discovery* in with infrastructure. The user clarified: shared **infra** (env keys, the
+rate-limited LLM client, Redis, MinIO/S3, Postgres, control plane) stays the same, but **context +
+discovery can be a completely new engine**.
+**Rule:** For any pivot/refactor, explicitly split two tiers — (1) **shared infrastructure** (config,
+LLM access, queue, storage, DB, control plane, generic media) which is reused verbatim, and (2)
+**domain/business logic** (here: discovery/selection) which is free to be rebuilt clean-room. Don't
+let "reuse the engine" force domain assumptions from the old product into the new one. Preserve the
+old logic in `legacy/`, port ideas not flow.
+
 ## 2026-06-27 — Verify the premise with real data before designing
 **Pattern:** The brief assumed RankZilla was a "ranking/#1-reveal" channel; real recon showed it's a
 single-hook machine (96% identical title). Pulling genuine data first (yt-dlp flat-playlist) prevented
