@@ -1,5 +1,10 @@
 # Lessons
 
+## 2026-06-27 — Verify the premise with real data before designing
+**Pattern:** The brief assumed RankZilla was a "ranking/#1-reveal" channel; real recon showed it's a
+single-hook machine (96% identical title). Pulling genuine data first (yt-dlp flat-playlist) prevented
+designing the wrong system. Always ground reverse-engineering in observed data; mark modeled vs observed.
+
 ## 2026-06-27 — The goal is YouTube Shorts; stop defaulting to Twitch
 **Correction:** I repeatedly proposed running Twitch discovery / labeling Twitch candidates as the
 next step (e.g., to make `/eval` produce a verdict). The user pushed back: the project goal is the
