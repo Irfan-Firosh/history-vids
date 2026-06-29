@@ -19,6 +19,7 @@ import os
 import subprocess
 import sys
 import textwrap
+import time
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -26,6 +27,9 @@ _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT))
 
 
+from studio import (  # noqa: E402
+    gemini,
+)
 from studio.style import LOCKED_STYLE, PALETTE  # noqa: E402
 
 W, H, FPS = 1920, 1080, 30
@@ -98,6 +102,59 @@ class PlaceholderImageProvider:
         return out_path
 
 
+class GeminiImageProvider:
+    """Real images via Gemini 2.5 Flash Image ("Nano Banana"). Needs GEMINI_API_KEY + billing.
+
+    Passes optional reference images (REF-1 character sheet, REF-2 expressions) so the recurring
+    stick-figure stays on-model across scenes. Flat ~$0.039/image. Pure request/parse logic lives in
+    `studio.gemini`; this is the thin httpx side-effect wrapper with billing-aware retry/backoff.
+    """
+
+    name = "gemini"
+
+    def __init__(
+        self,
+        model: str | None = None,
+        aspect_ratio: str | None = gemini.DEFAULT_ASPECT_RATIO,
+        max_retries: int = 4,
+    ) -> None:
+        self.model = model or os.environ.get("GEMINI_IMAGE_MODEL", gemini.DEFAULT_IMAGE_MODEL)
+        self.aspect_ratio = aspect_ratio
+        self.max_retries = max_retries
+
+    def generate(self, prompt: str, out_path: Path, refs: Sequence[Path] = ()) -> Path:
+        import httpx
+
+        key = os.environ.get("GEMINI_API_KEY")
+        if not key:
+            raise RuntimeError("Set GEMINI_API_KEY in .env (and enable billing) to use Gemini images.")
+        ref_b64 = [gemini.encode_image(Path(r).read_bytes()) for r in refs]
+        body = gemini.build_request(prompt, ref_b64, self.aspect_ratio)
+        url = gemini.endpoint(self.model, key)
+
+        for attempt in range(self.max_retries):
+            try:
+                resp = httpx.post(url, headers={"Content-Type": "application/json"}, json=body, timeout=120)
+            except httpx.RequestError as err:  # disconnect / timeout — transient, retry
+                if attempt == self.max_retries - 1:
+                    raise RuntimeError(f"Gemini network {type(err).__name__} after retries") from err
+                time.sleep(min(2**attempt, 30))
+                continue
+            try:
+                out_path.write_bytes(gemini.parse_image(resp.json()))
+                return out_path
+            except gemini.GeminiError as err:
+                if err.is_billing:
+                    raise RuntimeError(
+                        "Gemini billing problem — top up / enable pay-as-you-go at "
+                        f"https://ai.studio/projects. ({err.api_message[:160]})"
+                    ) from err
+                if not err.is_retryable or attempt == self.max_retries - 1:
+                    raise
+                time.sleep(2**attempt)  # backoff on transient 429/5xx
+        raise RuntimeError("unreachable")  # pragma: no cover
+
+
 # ── Voice providers ──────────────────────────────────────────────────────────
 class SayVoiceProvider:
     """macOS `say` → wav. The free PoC stand-in for Cartesia 'Carson'."""
@@ -151,3 +208,8 @@ def concat_audio(wavs: list[Path], out: Path) -> None:
     n = len(wavs)
     fc = "".join(f"[{i}:a]" for i in range(n)) + f"concat=n={n}:v=0:a=1[a]"
     _run(["ffmpeg", "-y", *inputs, "-filter_complex", fc, "-map", "[a]", str(out)])
+
+
+def load_channel_refs() -> list[Path]:
+    """The committed character references passed on character/wide shots (if present)."""
+    return [p for p in (REFS_DIR / "character.png", REFS_DIR / "expressions.png") if p.exists()]
