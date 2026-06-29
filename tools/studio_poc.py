@@ -112,6 +112,37 @@ class SayVoiceProvider:
         return ffprobe_duration(out_path)
 
 
+class CartesiaVoiceProvider:
+    """Real Cartesia TTS (Sonic). Needs CARTESIA_API_KEY (set) + CARTESIA_VOICE_ID (Carson)."""
+
+    name = "cartesia"
+
+    def synthesize(self, text: str, out_path: Path) -> float:
+        import httpx
+
+        key = os.environ.get("CARTESIA_API_KEY")
+        voice = os.environ.get("CARTESIA_VOICE_ID")
+        if not key or not voice:
+            raise RuntimeError(
+                "Set CARTESIA_API_KEY (present) and CARTESIA_VOICE_ID=<Carson's id> in .env to use Cartesia."
+            )
+        model = os.environ.get("CARTESIA_TTS_MODEL", "sonic-2")
+        resp = httpx.post(
+            "https://api.cartesia.ai/tts/bytes",
+            headers={"X-API-Key": key, "Cartesia-Version": "2024-11-13",
+                     "Content-Type": "application/json"},
+            json={
+                "model_id": model, "transcript": text,
+                "voice": {"mode": "id", "id": voice},
+                "output_format": {"container": "wav", "encoding": "pcm_s16le", "sample_rate": 44100},
+            },
+            timeout=60,
+        )
+        resp.raise_for_status()
+        out_path.write_bytes(resp.content)
+        return ffprobe_duration(out_path)
+
+
 def concat_audio(wavs: list[Path], out: Path) -> None:
     """Join per-beat wavs into one continuous narration track (the `say` offline path)."""
     inputs: list[str] = []
