@@ -33,6 +33,13 @@ def test_styled_prompt_is_stable_across_scenes():
     assert a.removeprefix("scene one") == b.removeprefix("scene two")  # identical style tail
 
 
+def test_styled_prompt_character_ref_locks_to_one_reference_figure():
+    out = styled_prompt("a lone figure with a torch", use_character_ref=True)
+    assert "reference image" in out and "Exactly one white-headed stick person" in out
+    wide = styled_prompt("three people walking in snow", use_character_ref=True, shot_type="wide")
+    assert "small simple group of white-headed stick people" in wide
+
+
 # ── scene filter (static hard-cut default; optional Ken-Burns) ─────────────────
 def test_static_is_the_default_and_has_no_motion():
     vf = scene_filter()  # default

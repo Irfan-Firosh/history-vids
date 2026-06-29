@@ -31,3 +31,4 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.ruff.lint.per-file-ignores]
 "tools/studio_poc.py" = ["E402", "E501"]   # sys.path bootstrap; long provider strings/docstrings
+"tools/make_refs.py" = ["E402", "E501"]    # sys.path bootstrap; long reference prompts
