@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
+import base64
 
 import pytest
 from pydantic import ValidationError
 
 from studio import DEMO_STORYBOARD, scene_filter
+from studio.gemini import (
+    DEFAULT_IMAGE_MODEL,
+    GeminiError,
+    build_request,
+    endpoint,
+    parse_image,
+)
 from studio.kenburns import MOTIONS, motion_for_index
 from studio.style import LOCKED_STYLE, styled_prompt
 from studio.types import Scene, Storyboard, shot_uses_character
@@ -92,3 +100,59 @@ def test_invalid_shot_type_is_rejected():
 def test_demo_storyboard_tags_every_scene_with_a_valid_shot():
     valid = ("character", "wide", "concept", "map")
     assert all(s.shot_type in valid for s in DEMO_STORYBOARD.scenes)
+
+
+# ── Gemini request/response helpers (pure, offline — no quota spend) ────────────
+def test_build_request_text_only_has_16x9_and_image_modality():
+    body = build_request("hello")
+    assert body["contents"][0]["parts"] == [{"text": "hello"}]
+    assert body["generationConfig"]["responseModalities"] == ["IMAGE"]
+    assert body["generationConfig"]["imageConfig"]["aspectRatio"] == "16:9"
+
+
+def test_build_request_appends_reference_images_as_inline_png():
+    body = build_request("hi", ["QUJD", "REVG"])
+    parts = body["contents"][0]["parts"]
+    assert parts[0] == {"text": "hi"}
+    assert [p["inlineData"]["data"] for p in parts[1:]] == ["QUJD", "REVG"]
+    assert all(p["inlineData"]["mimeType"] == "image/png" for p in parts[1:])
+
+
+def test_build_request_can_omit_aspect_ratio_for_reference_sheets():
+    assert "imageConfig" not in build_request("x", aspect_ratio=None)["generationConfig"]
+
+
+def test_parse_image_decodes_inline_png():
+    raw = b"\x89PNG\r\n fake-bytes"
+    resp = {"candidates": [{"content": {"parts": [
+        {"inlineData": {"mimeType": "image/png", "data": base64.b64encode(raw).decode()}}
+    ]}}]}
+    assert parse_image(resp) == raw
+
+
+def test_parse_image_billing_error_is_not_retryable():
+    resp = {"error": {"code": 429, "status": "RESOURCE_EXHAUSTED",
+                      "message": "Your prepayment credits are depleted."}}
+    with pytest.raises(GeminiError) as ei:
+        parse_image(resp)
+    assert ei.value.is_billing and not ei.value.is_retryable
+
+
+def test_parse_image_transient_429_is_retryable():
+    resp = {"error": {"code": 429, "status": "RESOURCE_EXHAUSTED", "message": "rate limit hit"}}
+    with pytest.raises(GeminiError) as ei:
+        parse_image(resp)
+    assert ei.value.is_retryable and not ei.value.is_billing
+
+
+def test_parse_image_raises_when_no_image_returned():
+    resp = {"candidates": [{"content": {"parts": [{"text": "I can't draw that"}]}}]}
+    with pytest.raises(GeminiError) as ei:
+        parse_image(resp)
+    assert ei.value.status == "NO_IMAGE"
+
+
+def test_endpoint_targets_generate_content():
+    assert endpoint(DEFAULT_IMAGE_MODEL, "KEY").endswith(
+        "gemini-2.5-flash-image:generateContent?key=KEY"
+    )
