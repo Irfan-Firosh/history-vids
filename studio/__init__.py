@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from studio import gemini
 from studio.kenburns import MOTIONS, scene_filter
+from studio.run_log import RunManifest, RunRecorder, SceneRecord, new_run_id
 from studio.storyboard import DEMO_STORYBOARD
 from studio.style import CONCEPT_STYLE, LOCKED_STYLE, styled_prompt
 from studio.types import (
@@ -36,4 +37,8 @@ __all__ = [
     "SHOT_TYPES",
     "shot_uses_character",
     "gemini",
+    "RunRecorder",
+    "RunManifest",
+    "SceneRecord",
+    "new_run_id",
 ]

@@ -1,0 +1,588 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Pipeline Runs</title>
+<style>
+  /* Strict black & white, one monospace face. Theme = CSS vars; dark just swaps bg/fg. */
+  :root { --bg:#fff; --fg:#000; --line:#000; --muted:#555; --hover:#f0f0f0; --panel:#fff; }
+  html[data-theme="dark"] { --bg:#0a0a0a; --fg:#e8e8e8; --line:#e8e8e8; --muted:#888; --hover:#161616; --panel:#0a0a0a; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  header {
+    display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+    padding: 12px 16px; border-bottom: 2px solid var(--line);
+  }
+  header h1 { font-size: 14px; margin: 0; letter-spacing: .5px; text-transform: uppercase; }
+  header .spacer { flex: 1; }
+  label { text-transform: uppercase; font-size: 11px; letter-spacing: .5px; }
+  select, button, input[type=text] {
+    font: inherit; background: var(--bg); color: var(--fg);
+    border: 1px solid var(--line); padding: 4px 8px; border-radius: 0;
+  }
+  input[type=text] { min-width: 240px; }
+  button { cursor: pointer; }
+  button:hover:not(:disabled) { background: var(--fg); color: var(--bg); }
+  button:disabled { color: var(--muted); border-color: var(--muted); cursor: not-allowed; }
+  #status { font-size: 11px; color: var(--muted); }
+
+  main { display: grid; grid-template-columns: 240px 1fr; min-height: calc(100vh - 51px); }
+  #runs { border-right: 2px solid var(--line); overflow-y: auto; }
+  .run { padding: 8px 12px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 6px; }
+  .run:hover { background: var(--hover); }
+  .run.active { background: var(--fg); color: var(--bg); }
+  .run-body { flex: 1; min-width: 0; cursor: pointer; }
+  .run .id { font-weight: bold; }
+  .run .meta { font-size: 11px; color: var(--muted); }
+  .run.active .meta { color: var(--bg); opacity: .7; }
+  .run-del { border: 1px solid transparent; background: transparent; color: var(--muted);
+             font: inherit; cursor: pointer; padding: 1px 6px; border-radius: 0; }
+  .run:hover .run-del { border-color: var(--line); }
+  .run-del:hover { background: var(--fg); color: var(--bg); }
+  .run.active .run-del { color: var(--bg); border-color: var(--bg); }
+
+  #detail { padding: 16px; overflow-y: auto; }
+  .empty { color: var(--muted); padding: 40px; text-align: center; }
+  .tag { border: 1px solid var(--line); padding: 0 6px; text-transform: uppercase; font-size: 10px; }
+  .tag.failed { background: var(--fg); color: var(--bg); }
+  .sub { font-size: 11px; color: var(--muted); }
+  a { color: var(--fg); }
+
+  h2 { font-size: 13px; margin: 18px 0 8px; text-transform: uppercase; letter-spacing: .5px;
+       border-bottom: 1px solid var(--line); padding-bottom: 4px; }
+
+  /* Script — the narration beats, readable top-to-bottom */
+  .script { border: 1px solid var(--line); }
+  .beat { display: grid; grid-template-columns: 28px 70px 1fr; gap: 10px; padding: 8px 10px;
+          border-bottom: 1px solid var(--line); }
+  .beat:last-child { border-bottom: 0; }
+  .beat .n { color: var(--muted); }
+  .beat .st { font-size: 10px; text-transform: uppercase; color: var(--muted); }
+  .beat .cite { color: var(--muted); }
+
+  .scenes { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+  .card { border: 1px solid var(--line); padding: 8px; }
+  .card .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .card img { width: 100%; display: block; border: 1px solid var(--line); background: var(--hover); aspect-ratio: 16/9; object-fit: cover; }
+  /* a "fire spot" beat shows both of its distinct frames side by side (the on-screen cut) */
+  .card .frames { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+  .card .frames.one { grid-template-columns: 1fr; }
+  .card .frames .fr { position: relative; }
+  .card .frames .fr .n { position: absolute; top: 3px; left: 3px; font-size: 10px; padding: 0 4px;
+              background: rgba(0,0,0,.6); color: #fff; border-radius: 2px; }
+  .card .ph { width: 100%; aspect-ratio: 16/9; border: 1px dashed var(--muted); display: flex;
+              align-items: center; justify-content: center; color: var(--muted); font-size: 11px; }
+  .card .narr { font-size: 12px; margin-top: 6px; }
+  .card .prompt { font-size: 11px; margin-top: 4px; color: var(--muted); }
+
+  /* Planned callouts */
+  ul.callouts { list-style: none; padding: 0; margin: 0; }
+  ul.callouts li { font-size: 13px; padding: 4px 0; border-bottom: 1px solid var(--line); }
+
+  /* Exa sources */
+  .src { border: 1px solid var(--line); padding: 8px 10px; border-bottom: 0; }
+  .src:last-child { border-bottom: 1px solid var(--line); }
+  .src .t { font-size: 12px; }
+  .src .u { font-size: 11px; color: var(--muted); word-break: break-all; }
+
+  .reedit { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 10px 0; }
+  .reedit input[type=text] { min-width: 0; width: 56px; }
+  .reedit.review { border: 1px solid var(--fg); padding: 8px 10px; }
+  .regen { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+  .regen-prompt { width: 100%; box-sizing: border-box; font: inherit; font-size: 11px; resize: vertical; }
+  .regen-btn { font-size: 11px; align-self: flex-start; }
+  video { width: 100%; max-width: 720px; border: 1px solid var(--line); background: #000; }
+  img.thumb { width: 100%; max-width: 640px; border: 1px solid var(--line); display: block; margin-bottom: 8px; }
+  pre#log {
+    border: 1px solid var(--line); padding: 10px; background: var(--panel); max-height: 320px;
+    overflow: auto; white-space: pre-wrap; font-size: 12px; margin: 0; color: var(--fg);
+  }
+  .err { border: 2px solid var(--line); padding: 10px; }
+  .err pre { white-space: pre-wrap; font-size: 11px; margin: 6px 0 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Pipeline Runs</h1>
+  <label>Topic <input type="text" id="topic" placeholder="(optional) generate a script first" /></label>
+  <label>Images
+    <select id="images"><option value="gemini" selected>gemini</option><option value="cloudflare">cloudflare (flux.2 char)</option><option value="hf">hf (free)</option><option value="placeholder">placeholder</option></select>
+  </label>
+  <label>Voice
+    <select id="voice"><option value="say">say</option><option value="cartesia">cartesia</option></select>
+  </label>
+  <label><input type="checkbox" id="captions" checked /> subtitles</label>
+  <button id="run-btn">▶ Run</button>
+  <a href="/new" title="configure models per role">＋ New run (choose models)</a>
+  <span class="spacer"></span>
+  <button id="theme-btn" title="toggle dark / light">◐ theme</button>
+  <span id="status"></span>
+</header>
+
+<main>
+  <div id="runs"></div>
+  <div id="detail"><div class="empty">Select a run, or hit ▶ Run to start one.</div></div>
+</main>
+
+<script>
+const $ = (s) => document.querySelector(s);
+let selected = null;     // run_id currently shown
+let pollTimer = null;    // active polling interval
+
+function setStatus(msg) { $("#status").textContent = msg || ""; }
+function escapeHtml(t) {
+  return (t || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+function fileUrl(runId, path) { return `/api/runs/${runId}/file/${path}`; }
+
+// ── theme ──────────────────────────────────────────────────────────────────
+function applyTheme(t) { document.documentElement.dataset.theme = t; localStorage.setItem("theme", t); }
+$("#theme-btn").onclick = () =>
+  applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+applyTheme(localStorage.getItem("theme") || "light");
+
+// ── run list ────────────────────────────────────────────────────────────────
+async function loadRuns() {
+  const runs = await fetch("/api/runs").then((r) => r.json());
+  const box = $("#runs");
+  box.innerHTML = runs.length ? "" : '<div class="empty">No runs yet.</div>';
+  for (const r of runs) {
+    const el = document.createElement("div");
+    el.className = "run" + (r.run_id === selected ? " active" : "");
+    const dur = r.total_duration_sec ? ` · ${r.total_duration_sec.toFixed(1)}s` : "";
+    el.innerHTML =
+      `<div class="run-body">` +
+        `<div class="id">${r.run_id}</div>` +
+        `<div class="meta">${r.status} · ${r.rendered}/${r.scene_count} scenes${dur}</div>` +
+      `</div>` +
+      `<button class="run-del" title="delete run">✕</button>`;
+    el.querySelector(".run-body").onclick = () => selectRun(r.run_id);
+    el.querySelector(".run-del").onclick = (e) => { e.stopPropagation(); deleteRun(r.run_id); };
+    box.appendChild(el);
+  }
+}
+
+async function deleteRun(runId) {
+  if (!confirm(`Delete run ${runId}? This removes its images + video.`)) return;
+  const res = await fetch(`/api/runs/${runId}`, { method: "DELETE" });
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}));
+    setStatus("delete failed: " + (e.detail || res.status));
+    return;
+  }
+  if (selected === runId) {
+    selected = null;
+    stopPoll();
+    $("#detail").innerHTML = '<div class="empty">Select a run, or hit ▶ Run to start one.</div>';
+  }
+  loadRuns();
+}
+
+// ── detail sections ──────────────────────────────────────────────────────────
+function citeStr(cite) { return cite && cite.length ? ` [${cite.join("][")}]` : ""; }
+
+function scriptSection(m) {
+  if (!m.scenes.length || !m.scenes.some((s) => s.narration)) return "";
+  const beats = m.scenes.map((s) =>
+    `<div class="beat"><span class="n">${s.index}</span>` +
+    `<span class="st">${s.shot_type}</span>` +
+    `<span>${escapeHtml(s.narration)}<span class="cite">${citeStr(s.cite)}</span></span></div>`
+  ).join("");
+  return `<h2>Script</h2><div class="script">${beats}</div>`;
+}
+
+function sceneCard(s, reviewMode = false, busy = false) {
+  // Cache-key on the scene's last-updated time (NOT Date.now()): the URL stays stable across polls
+  // so the browser reuses the cached image (no per-poll re-fetch / blink), but changes when the
+  // scene is regenerated (scene_image bumps updated_at) so a new image still loads.
+  // A "fire spot" beat (frame_count > 1) shows two DISTINCT frames — render every frame so you can
+  // see both. Extra frames follow the img_i_1.png … naming convention off the base image_path.
+  let img;
+  if (s.image_path) {
+    const v = encodeURIComponent(s.updated_at || "0");
+    const fc = Math.max(1, s.frame_count || 1);
+    const urls = [s.image_path];
+    for (let k = 1; k < fc; k++) urls.push(s.image_path.replace(/\.png$/, `_${k}.png`));
+    const frames = urls
+      .map((u, k) =>
+        `<span class="fr"><img src="${fileUrl(selected, u)}?v=${v}" alt="scene ${s.index} frame ${k + 1}" loading="lazy" />` +
+        (urls.length > 1 ? `<span class="n">${k + 1}</span>` : "") + `</span>`)
+      .join("");
+    img = `<div class="frames${urls.length > 1 ? "" : " one"}"${urls.length > 1 ? ' title="🔥 fire spot — both on-screen frames"' : ""}>${frames}</div>`;
+  } else {
+    img = `<div class="ph">${s.status === "started" ? "generating…" : "no image"}</div>`;
+  }
+  const dur = s.narration_duration_sec != null ? `${s.narration_duration_sec.toFixed(1)}s` : "—";
+  const callout = s.emphasis ? ` · 📌 ${escapeHtml(s.emphasis)}` : "";
+  const intense = (s.frame_count || 1) > 1 ? ` · 🔥 ${s.frame_count} frames`
+    : (s.intense ? " · 🔥" : "");
+  // In review mode each image gets an EDITABLE prompt + a Regenerate button: tweak the text (or
+  // leave it) and re-draw just this scene, then it re-pauses for another look.
+  const dis = busy ? " disabled" : "";
+  const regen = reviewMode
+    ? `<div class="regen">` +
+        `<textarea class="regen-prompt" data-idx="${s.index}" rows="2"${dis} ` +
+        `title="edit the prompt for this scene, then Regenerate">${escapeHtml(s.image_prompt)}</textarea>` +
+        `<button class="regen-btn" data-idx="${s.index}"${dis} ` +
+        `title="re-draw this image using the prompt above">↻ Regenerate</button>` +
+      `</div>`
+    : "";
+  // Outside review, show the (read-only) prompt line as before.
+  const promptLine = reviewMode ? "" : `<div class="prompt">▸ ${escapeHtml(s.image_prompt)}</div>`;
+  return (
+    `<div class="card">` +
+      `<div class="head"><span class="tag">${s.shot_type}</span>` +
+      `<span class="sub">#${s.index} · ${s.status} · ${dur}${s.ref_count ? ` · refs ${s.ref_count}` : ""}${callout}${intense}</span></div>` +
+      img +
+      (s.narration ? `<div class="narr">${escapeHtml(s.narration)}</div>` : "") +
+      promptLine +
+      regen +
+    `</div>`
+  );
+}
+
+// The sparse key-fact callouts that WILL be flashed on screen (post spacing-cap): what text, on
+// which scene's frame, at what time. Lets you see the callout plan at a glance before it renders.
+function calloutsSection(m) {
+  const cs = m.callouts || [];
+  if (!cs.length) return "";
+  const rows = cs
+    .map(
+      (c) =>
+        `<li>📌 <strong>${escapeHtml(c.text)}</strong>` +
+        ` <span class="sub">— scene #${c.scene_index} · frame 1 · ${(c.start_sec || 0).toFixed(1)}s</span></li>`
+    )
+    .join("");
+  return `<h2>Planned callouts (${cs.length})</h2><ul class="callouts">${rows}</ul>`;
+}
+
+async function sourcesSection(m) {
+  if (!m.sources_path) return "";
+  let sources;
+  try { sources = await fetch(fileUrl(m.run_id, m.sources_path)).then((r) => r.json()); }
+  catch { return ""; }
+  if (!Array.isArray(sources) || !sources.length) return "";
+  const items = sources.map((s, i) =>
+    `<div class="src"><div class="t">[${i + 1}] ${escapeHtml(s.title)}` +
+    `${s.published ? ` · ${escapeHtml(String(s.published).slice(0, 10))}` : ""}</div>` +
+    `<div class="u"><a href="${escapeHtml(s.url)}" target="_blank" rel="noopener">${escapeHtml(s.url)}</a></div></div>`
+  ).join("");
+  const qc = m.qc_path
+    ? ` <a href="${fileUrl(m.run_id, m.qc_path)}" target="_blank" rel="noopener">(fact-check qc.md)</a>` : "";
+  return `<h2>Exa sources (${sources.length})${qc}</h2>${items}`;
+}
+
+async function renderDetail(runId) {
+  const [m, log] = await Promise.all([
+    fetch(`/api/runs/${runId}`).then((r) => (r.ok ? r.json() : null)),
+    fetch(`/api/runs/${runId}/log`).then((r) => r.text()),
+  ]);
+  if (!m) return;
+  const failedTag = m.status === "failed" ? ' <span class="tag failed">failed</span>' : "";
+  const dur = m.total_duration_sec ? ` · ${m.total_duration_sec.toFixed(1)}s` : "";
+  const topic = m.topic ? ` · topic: ${escapeHtml(m.topic)}` : "";
+
+  const reedit = m.reedit || {};
+  const resume = m.resume || {};
+  const approval = m.approval || {};
+  const reviewBusy = !!(approval.assembling || approval.regenerating);
+
+  let html =
+    `<div><strong>${escapeHtml(m.title)}</strong>${failedTag}</div>` +
+    `<div class="sub">${m.run_id} · ${m.status}${dur} · images=${m.images_provider} voice=${m.voice_provider}${topic}</div>`;
+  if (m.resume_note) html += `<div class="sub">↻ ${escapeHtml(m.resume_note)}</div>`;
+
+  // Human-in-the-loop review gate: all images are generated but NOTHING is assembled until you
+  // approve. Review the images below, regenerate any you don't like, then Approve to compile.
+  if (approval.available) {
+    const note = approval.assembling
+      ? "assembling the video…"
+      : approval.regenerating
+      ? "regenerating an image…"
+      : "review the images below · regenerate any you don't like · nothing is compiled until you approve";
+    html +=
+      `<div class="reedit review">` +
+        `<button id="approve-btn"${reviewBusy ? " disabled" : ""} title="assemble the final video from these images">✓ Approve & Assemble</button>` +
+        `<span class="sub" id="approve-status">${note}</span>` +
+      `</div>`;
+  }
+
+  // Re-run: start a brand-new run from scratch (new script + new images) reusing this run's topic,
+  // image models, and voice. Disabled while this run is still going.
+  {
+    const running = m.status === "running";
+    html +=
+      `<div class="reedit">` +
+        `<button id="rerun-btn"${running ? " disabled" : ""} title="start a fresh run (new script + new images) with the same topic, models, and voice">⟳ Re-run</button>` +
+        `<span class="sub">${running ? "run in progress…" : "regenerates everything from scratch as a new run"}</span>` +
+      `</div>`;
+  }
+
+  // Resume control: pick a stopped/failed run back up, reusing the frames already generated.
+  if (resume.available || resume.running) {
+    const running = resume.running;
+    html +=
+      `<div class="reedit">` +
+        `<button id="resume-btn"${running ? " disabled" : ""} title="reuse frames on disk, generate the rest, reassemble">▶ Resume</button>` +
+        `<label class="sub"><input type="checkbox" id="resume-subs" checked${running ? " disabled" : ""} /> subtitles</label>` +
+        `<span class="sub" id="resume-status">${running ? "resuming… reusing existing frames" : "picks up from where it stopped"}</span>` +
+      `</div>`;
+  }
+
+  // Re-edit control: reruns only the Cartesia TTS + retimed cuts on the images already on disk.
+  if (reedit.available) {
+    const running = reedit.running;
+    html +=
+      `<div class="reedit">` +
+        `<button id="reedit-btn"${running ? " disabled" : ""} title="fresh Cartesia narration + retimed image/caption cuts (no image regen)">↻ Re-edit</button>` +
+        `<label class="sub">speed <input type="text" id="reedit-speed" value="0.88"${running ? " disabled" : ""} /></label>` +
+        `<span class="sub" id="reedit-status">${running ? "re-editing… new narration + timeline" : "reuses images · new Cartesia audio"}</span>` +
+      `</div>`;
+  }
+
+  // Re-edited output takes precedence; the original stays available below it.
+  const reeditLog = (reedit.running || reedit.video)
+    ? await fetch(fileUrl(runId, "reassemble.log")).then((r) => (r.ok ? r.text() : "")).catch(() => "")
+    : "";
+  if (reedit.video) {
+    // Bust cache on the re-edit log LENGTH (stable once the re-edit is done, changes on a new one)
+    // rather than Date.now() so the player doesn't reload every poll.
+    html += `<h2>Re-edited video (v2)</h2>` +
+      `<video data-key="v2" controls src="${fileUrl(runId, reedit.video)}?v=${reeditLog.length}"></video>`;
+  }
+  if (m.video_path) {
+    const label = reedit.video ? "Original video" : "Final video";
+    html += `<h2>${label}</h2><video data-key="main" controls src="${fileUrl(runId, m.video_path)}"></video>`;
+  }
+
+  // Thumbnail: a focal image + big title overlay. Show it (if made) + a form to (re)generate it.
+  const thumb = m.thumbnail || {};
+  if (thumb.available || m.thumbnail_path) {
+    const tRunning = thumb.running;
+    if (m.thumbnail_path) {
+      html += `<h2>Thumbnail</h2>` +
+        `<img class="thumb" src="${fileUrl(runId, m.thumbnail_path)}?v=${encodeURIComponent(m.updated_at || "")}" alt="thumbnail" />`;
+    }
+    html +=
+      `<div class="reedit">` +
+        `<input type="text" id="thumb-text" placeholder="big title words" ` +
+        `value="${escapeHtml(m.title || "")}"${tRunning ? " disabled" : ""} />` +
+        `<button id="thumb-btn"${tRunning ? " disabled" : ""} title="generate a thumbnail (focal image + big title)">` +
+        `🖼 ${m.thumbnail_path ? "Regenerate" : "Generate"} thumbnail</button>` +
+        `<span class="sub" id="thumb-status">${tRunning ? "generating thumbnail…" : "focal image + big title overlay"}</span>` +
+      `</div>`;
+  }
+  if (reeditLog) {
+    html += `<h2>Re-edit log</h2><pre id="relog">${escapeHtml(reeditLog)}</pre>`;
+  }
+  if (m.error) {
+    html += `<div class="err"><strong>Error:</strong> ${escapeHtml(m.error.message)}` +
+            `<pre>${escapeHtml(m.error.traceback || "")}</pre></div>`;
+  }
+  html += scriptSection(m);
+  html += calloutsSection(m);
+  html += `<h2>Scenes (${m.scenes.length}/${m.scene_count})</h2>`;
+  // Show the per-scene Regenerate controls whenever the run is editable — at the review gate AND on
+  // a finished run (regenerating an image drops it back into the gate so Approve rebuilds the video).
+  const reviewMode = !!approval.editable;
+  html += `<div class="scenes">${m.scenes.map((s) => sceneCard(s, reviewMode, reviewBusy)).join("")}</div>`;
+  html += await sourcesSection(m);
+  html += `<h2>Log</h2><pre id="log">${escapeHtml(log)}</pre>`;
+
+  // Preserve existing <video> elements across the re-render: rebuilding innerHTML every poll would
+  // destroy + recreate the player, making it reload and flicker. Snapshot the current videos, and
+  // after the swap re-use any whose src is unchanged (keeps the loaded media + playback position).
+  const prevVideos = {};
+  $("#detail").querySelectorAll("video[data-key]").forEach((v) => { prevVideos[v.dataset.key] = v; });
+  $("#detail").innerHTML = html;
+  $("#detail").querySelectorAll("video[data-key]").forEach((nv) => {
+    const ov = prevVideos[nv.dataset.key];
+    if (ov && ov.getAttribute("src") === nv.getAttribute("src")) nv.replaceWith(ov);
+  });
+
+  const rb = document.getElementById("reedit-btn");
+  if (rb) rb.onclick = () => reeditRun(runId);
+  const sb = document.getElementById("resume-btn");
+  if (sb) sb.onclick = () => resumeRun(runId);
+  const rr = document.getElementById("rerun-btn");
+  if (rr) rr.onclick = () => rerunRun(runId);
+  const ab = document.getElementById("approve-btn");
+  if (ab) ab.onclick = () => approveRun(runId);
+  document.querySelectorAll(".regen-btn").forEach(
+    (b) => (b.onclick = () => regenerateScene(runId, parseInt(b.dataset.idx, 10)))
+  );
+  const tb = document.getElementById("thumb-btn");
+  if (tb) tb.onclick = () => generateThumbnail(runId);
+
+  // Poll only while a job is actively working (render / regenerate / assemble / re-edit / resume /
+  // thumbnail). We deliberately do NOT poll an idle run parked at the review gate — a 1s re-render
+  // would wipe whatever you're typing into a scene's prompt box. Clicking a button restarts polling.
+  if (m.status === "running" || reedit.running || resume.running || reviewBusy || thumb.running)
+    schedulePoll(runId);
+  else { stopPoll(); loadRuns(); }
+}
+
+// Resume a stopped/failed run: reuse frames on disk, generate the rest, reassemble.
+async function resumeRun(runId) {
+  const subsEl = document.getElementById("resume-subs");
+  const captions = subsEl ? subsEl.checked : true;
+  const btn = document.getElementById("resume-btn");
+  if (btn) btn.disabled = true;
+  setStatus(`resuming ${runId} …`);
+  const res = await fetch(`/api/runs/${runId}/resume`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ captions }),
+  });
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}));
+    setStatus("resume failed: " + (e.detail || res.status));
+    if (btn) btn.disabled = false;
+    return;
+  }
+  await renderDetail(runId);  // picks up resume.running → begins polling
+}
+
+// Re-edit a saved run: fresh Cartesia TTS + retimed cuts, reusing its images (no regen).
+async function reeditRun(runId) {
+  const speedEl = document.getElementById("reedit-speed");
+  const speed = Math.max(0.6, Math.min(1.5, parseFloat(speedEl && speedEl.value) || 0.88));
+  const rb = document.getElementById("reedit-btn");
+  if (rb) rb.disabled = true;
+  setStatus(`re-editing ${runId} @ ${speed}× …`);
+  const res = await fetch(`/api/runs/${runId}/reassemble`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ speed }),
+  });
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}));
+    setStatus("re-edit failed: " + (e.detail || res.status));
+    if (rb) rb.disabled = false;
+    return;
+  }
+  await renderDetail(runId);  // picks up reedit.running → begins polling until video_v2 appears
+}
+
+// Re-run: spawn a brand-new run reusing this run's topic + providers + voice, then jump to it.
+async function rerunRun(runId) {
+  const btn = document.getElementById("rerun-btn");
+  if (btn) btn.disabled = true;
+  setStatus(`re-running ${runId} …`);
+  const res = await fetch(`/api/runs/${runId}/rerun`, { method: "POST" });
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}));
+    setStatus("re-run failed: " + (e.detail || res.status));
+    if (btn) btn.disabled = false;
+    return;
+  }
+  const { run_id } = await res.json();
+  setStatus(`started ${run_id}`);
+  await selectRun(run_id);  // navigate to the fresh run and begin polling
+}
+
+// Approve a reviewed run: assemble the final video from the images already on disk.
+async function approveRun(runId) {
+  const btn = document.getElementById("approve-btn");
+  if (btn) btn.disabled = true;
+  setStatus(`assembling ${runId} …`);
+  const res = await fetch(`/api/runs/${runId}/approve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ captions: true }),
+  });
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}));
+    setStatus("approve failed: " + (e.detail || res.status));
+    if (btn) btn.disabled = false;
+    return;
+  }
+  await renderDetail(runId);  // picks up approval.assembling → polls until the video appears
+}
+
+// Regenerate one scene's image(s) during review — using the edited prompt in that scene's box (or
+// the original if untouched) — then keep waiting for approval.
+async function regenerateScene(runId, idx) {
+  const ta = document.querySelector(`.regen-prompt[data-idx="${idx}"]`);
+  const prompt = ta && ta.value.trim() ? ta.value.trim() : null;  // null → reuse the script's prompt
+  setStatus(`regenerating scene ${idx} …`);
+  const res = await fetch(`/api/runs/${runId}/regenerate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ scene_index: idx, prompt }),
+  });
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}));
+    setStatus("regenerate failed: " + (e.detail || res.status));
+    return;
+  }
+  await renderDetail(runId);  // approval.regenerating → polls until the new image lands
+}
+
+// Generate (or regenerate) a YouTube thumbnail: focal image + big title from the text box.
+async function generateThumbnail(runId) {
+  const el = document.getElementById("thumb-text");
+  const text = el && el.value.trim() ? el.value.trim() : null;
+  const btn = document.getElementById("thumb-btn");
+  if (btn) btn.disabled = true;
+  setStatus(`generating thumbnail for ${runId} …`);
+  const res = await fetch(`/api/runs/${runId}/thumbnail`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}));
+    setStatus("thumbnail failed: " + (e.detail || res.status));
+    if (btn) btn.disabled = false;
+    return;
+  }
+  await renderDetail(runId);  // thumbnail.running → polls until the image lands
+}
+
+function schedulePoll(runId) { stopPoll(); pollTimer = setTimeout(() => renderDetail(runId), 1000); }
+function stopPoll() { if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; } }
+
+async function selectRun(runId) {
+  selected = runId;
+  stopPoll();
+  loadRuns();
+  await renderDetail(runId);
+}
+
+$("#run-btn").onclick = async () => {
+  const btn = $("#run-btn");
+  btn.disabled = true;
+  setStatus("starting…");
+  try {
+    const res = await fetch("/api/runs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        topic: $("#topic").value.trim() || null,
+        images: $("#images").value,
+        voice: $("#voice").value,
+        captions: $("#captions").checked,
+      }),
+    });
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      setStatus("error: " + (e.detail || res.status));
+      return;
+    }
+    const { run_id } = await res.json();
+    setStatus("running " + run_id);
+    await selectRun(run_id);
+  } finally {
+    btn.disabled = false;
+  }
+};
+
+loadRuns();
+</script>
+</body>
+</html>
