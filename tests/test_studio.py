@@ -16,6 +16,13 @@ from studio.gemini import (
     parse_image,
 )
 from studio.kenburns import MOTIONS, motion_for_index
+from studio.llm import (
+    LLMError,
+    build_chat_request,
+    chat_endpoint,
+    extract_message,
+    parse_json_block,
+)
 from studio.style import LOCKED_STYLE, styled_prompt
 from studio.types import Scene, Storyboard, shot_uses_character
 
@@ -163,3 +170,46 @@ def test_endpoint_targets_generate_content():
     assert endpoint(DEFAULT_IMAGE_MODEL, "KEY").endswith(
         "gemini-2.5-flash-image:generateContent?key=KEY"
     )
+
+
+# ── LLM script helpers (pure, offline) ─────────────────────────────────────────
+def test_chat_endpoint_appends_path_without_double_slash():
+    assert chat_endpoint("https://x.test/api/") == "https://x.test/api/chat/completions"
+    assert chat_endpoint("https://x.test/api") == "https://x.test/api/chat/completions"
+
+
+def test_build_chat_request_has_system_and_user_messages():
+    body = build_chat_request("gpt-oss:120b", "be brief", "hello", temperature=0.3, max_tokens=100)
+    assert body["model"] == "gpt-oss:120b" and body["stream"] is False
+    assert body["temperature"] == 0.3 and body["max_tokens"] == 100
+    roles = [m["role"] for m in body["messages"]]
+    assert roles == ["system", "user"]
+
+
+def test_extract_message_returns_content():
+    resp = {"choices": [{"message": {"role": "assistant", "content": "hi there"}}]}
+    assert extract_message(resp) == "hi there"
+
+
+def test_extract_message_raises_on_api_error():
+    with pytest.raises(LLMError):
+        extract_message({"error": {"message": "model not found"}})
+
+
+def test_extract_message_raises_on_malformed():
+    with pytest.raises(LLMError):
+        extract_message({"weird": True})
+
+
+def test_parse_json_block_handles_fenced_and_prose():
+    text = 'Sure! Here it is:\n```json\n{"title": "T", "scenes": []}\n```\nHope that helps.'
+    assert parse_json_block(text) == {"title": "T", "scenes": []}
+
+
+def test_parse_json_block_handles_bare_object_with_prose():
+    assert parse_json_block('blah {"a": 1} trailing')["a"] == 1
+
+
+def test_parse_json_block_raises_when_no_json():
+    with pytest.raises(LLMError):
+        parse_json_block("no object here")
