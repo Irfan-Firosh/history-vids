@@ -10,6 +10,7 @@ Run it:  uv run uvicorn dashboard.app:app --reload  →  http://127.0.0.1:8000
 from __future__ import annotations
 
 import json
+import shutil
 import threading
 from pathlib import Path
 
@@ -109,3 +110,15 @@ def get_file(run_id: str, name: str) -> FileResponse:
     if not target.is_relative_to(run_dir) or not target.is_file():
         raise HTTPException(status_code=404, detail=f"file {name!r} not found")
     return FileResponse(target)
+
+
+@app.delete("/api/runs/{run_id}")
+def delete_run(run_id: str) -> dict[str, str]:
+    """Delete a run's directory. Refuses to delete the run that's currently in progress."""
+    with _lock:
+        proc = _active["proc"]
+        if _active["run_id"] == run_id and proc is not None and proc.poll() is None:
+            raise HTTPException(status_code=409, detail="run is still in progress")
+    run_dir = _run_dir(run_id)  # 404 + traversal-guarded
+    shutil.rmtree(run_dir)
+    return {"deleted": run_id}

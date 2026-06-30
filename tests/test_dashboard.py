@@ -58,3 +58,11 @@ def test_traversal_is_blocked(client):
     # Even a crafted name must not escape the run dir.
     r = client.get("/api/runs/20260101-000000/file/..%2f..%2frun.json")
     assert r.status_code == 404
+
+
+def test_delete_missing_run_is_404(client):
+    assert client.request("DELETE", "/api/runs/nope").status_code == 404
+
+
+def test_delete_traversal_blocked(client):
+    assert client.request("DELETE", "/api/runs/..%2f..%2fetc").status_code == 404
