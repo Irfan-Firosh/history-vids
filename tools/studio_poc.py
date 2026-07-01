@@ -22,6 +22,7 @@ import subprocess
 import sys
 import textwrap
 import time
+import unicodedata
 import wave
 from collections.abc import Sequence
 from pathlib import Path
@@ -310,6 +311,51 @@ class CartesiaTimestampVoice:
             dur = len(pcm) / 2 / SAMPLE_RATE
             words, starts, ends = [text], [0.0], [dur]
         return words, starts, ends
+
+
+# ── FFmpeg motion + assembly ─────────────────────────────────────────────────
+# Punctuation the LLM/TTS emit that the caption font lacks a glyph for -> ASCII (else tofu box).
+_CAPTION_SUBST = {
+    0x2011: "-", 0x2013: "-", 0x2014: "-",  # non-breaking / en / em dashes
+    0x2018: "'", 0x2019: "'", 0x201C: '"', 0x201D: '"',  # curly quotes
+    0x2026: "...",  # ellipsis
+}
+
+
+def _clean_caption(text: str) -> str:
+    """Map exotic unicode punctuation to ASCII so the overlay font renders it (no tofu boxes)."""
+    # Any unicode space-separator (Zs: no-break U+00A0, narrow U+202F, thin U+2009) or zero-width
+    # format char (Cf: BOM, ZWSP) -> a plain space; then map dashes/quotes/ellipsis by code point.
+    folded = "".join(
+        " " if unicodedata.category(ch) in ("Zs", "Cf") else ch for ch in text
+    )
+    return folded.translate(_CAPTION_SUBST)
+
+
+def make_caption_png(text: str, out: Path) -> None:
+    """Render a full-frame transparent caption PNG (this ffmpeg lacks drawtext/libass, so we
+    overlay a PNG — the same pattern the repo's caption renderer uses)."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    text = _clean_caption(text)
+    im = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    ff = _fontfile()
+    font = ImageFont.truetype(ff, 46) if ff else ImageFont.load_default()
+    lines = textwrap.wrap(text, width=46)
+    line_h = 60
+    block_h = line_h * len(lines)
+    top = H - block_h - 110
+    maxw = max((d.textlength(ln, font=font) for ln in lines), default=0)
+    pad = 32
+    d.rectangle([(W - maxw) / 2 - pad, top - pad, (W + maxw) / 2 + pad, top + block_h + pad - 12],
+                fill=(0, 0, 0, 150))
+    y = top
+    for ln in lines:
+        w = d.textlength(ln, font=font)
+        d.text(((W - w) / 2, y), ln, font=font, fill=(255, 255, 255, 255))
+        y += line_h
+    im.save(out)
 
 
 def concat_audio(wavs: list[Path], out: Path) -> None:
