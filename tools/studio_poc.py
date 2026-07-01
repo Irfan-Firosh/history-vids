@@ -29,6 +29,7 @@ sys.path.insert(0, str(_ROOT))
 
 from studio import (  # noqa: E402
     gemini,
+    huggingface,
 )
 from studio.style import LOCKED_STYLE, PALETTE  # noqa: E402
 
@@ -153,6 +154,42 @@ class GeminiImageProvider:
                     raise
                 time.sleep(2**attempt)  # backoff on transient 429/5xx
         raise RuntimeError("unreachable")  # pragma: no cover
+
+
+class HuggingFaceImageProvider:
+    """Free-tier images via HuggingFace Inference (FLUX.1-schnell). Needs HUGGINGFACE_TOKEN.
+
+    Text-to-image only (no reference conditioning) → used for shots that DON'T need the recurring
+    character: concept/map shots and the trivial cutaway symbols. `refs` are ignored.
+    """
+
+    name = "hf"
+
+    def __init__(self, model: str | None = None, max_retries: int = 4) -> None:
+        self.model = model or os.environ.get("HF_IMAGE_MODEL", huggingface.DEFAULT_MODEL)
+        self.max_retries = max_retries
+
+    def generate(self, prompt: str, out_path: Path, refs: Sequence[Path] = ()) -> Path:
+        import httpx
+
+        token = os.environ.get("HUGGINGFACE_TOKEN") or os.environ.get("HF_TOKEN")
+        if not token:
+            raise RuntimeError("Set HUGGINGFACE_TOKEN in .env to use HuggingFace images.")
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        body = huggingface.request_body(prompt)
+        last = "no endpoint tried"
+        for url in huggingface.endpoints(self.model):
+            for attempt in range(self.max_retries):
+                resp = httpx.post(url, headers=headers, json=body, timeout=120)
+                if resp.status_code == 200 and resp.headers.get("content-type", "").startswith("image"):
+                    out_path.write_bytes(resp.content)
+                    return out_path
+                if resp.status_code == 503:  # model loading — back off and retry
+                    time.sleep(2**attempt)
+                    continue
+                last = f"{resp.status_code} {resp.text[:150]}"
+                break  # try the next endpoint
+        raise RuntimeError(f"HuggingFace image failed ({self.model}): {last}")
 
 
 # ── Voice providers ──────────────────────────────────────────────────────────

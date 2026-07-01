@@ -7,7 +7,7 @@ import base64
 import pytest
 from pydantic import ValidationError
 
-from studio import DEMO_STORYBOARD, scene_filter
+from studio import DEMO_STORYBOARD, huggingface, scene_filter
 from studio.gemini import (
     DEFAULT_IMAGE_MODEL,
     GeminiError,
@@ -300,3 +300,14 @@ def test_query_system_prompt_seeks_evidence_and_disagreement():
 def test_build_query_user_prompt_includes_topic_and_count():
     out = build_query_user_prompt("ancient sleep", 5)
     assert "ancient sleep" in out and "5" in out
+
+
+# ── HuggingFace helpers (pure) ─────────────────────────────────────────────────
+def test_hf_endpoints_try_router_then_classic():
+    router, classic = huggingface.endpoints("org/model")
+    assert router.startswith("https://router.huggingface.co") and router.endswith("org/model")
+    assert "api-inference.huggingface.co" in classic and classic.endswith("org/model")
+
+
+def test_hf_request_body_is_text_to_image():
+    assert huggingface.request_body("hi") == {"inputs": "hi"}
