@@ -8,6 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from studio import DEMO_STORYBOARD, huggingface, scene_filter
+from studio.captions import cue_timings, split_caption_cues
 from studio.gemini import (
     DEFAULT_IMAGE_MODEL,
     GeminiError,
@@ -300,6 +301,38 @@ def test_query_system_prompt_seeks_evidence_and_disagreement():
 def test_build_query_user_prompt_includes_topic_and_count():
     out = build_query_user_prompt("ancient sleep", 5)
     assert "ancient sleep" in out and "5" in out
+
+
+# ── caption cues (short timed subtitles) ───────────────────────────────────────
+def test_split_caption_cues_keeps_chunks_short():
+    text = "You stir before dawn, the cold air biting as the fire crackles for the first time."
+    cues = split_caption_cues(text, max_words=7, max_chars=42)
+    assert len(cues) >= 2  # long sentence → multiple cues, not one wall of text
+    assert all(len(c) <= 42 and len(c.split()) <= 7 for c in cues)
+    assert " ".join(cues).split() == text.split()  # no words lost
+
+
+def test_split_caption_cues_empty():
+    assert split_caption_cues("") == []
+
+
+def test_cue_timings_cover_full_duration_in_order():
+    cues = ["one two", "three four five", "six"]
+    spans = cue_timings(cues, 9.0)
+    assert len(spans) == 3
+    assert spans[0][0] == 0.0 and spans[-1][1] == 9.0  # covers [0, dur]
+    assert all(spans[i][1] == spans[i + 1][0] for i in range(len(spans) - 1))  # contiguous
+    assert all(s < e for s, e in spans)  # forward
+
+
+def test_cue_timings_weights_longer_cues_with_more_time():
+    short, long = cue_timings(["hi", "a much longer caption here"], 10.0)
+    assert (long[1] - long[0]) > (short[1] - short[0])  # longer text → more screen time
+
+
+def test_cue_timings_empty_or_zero():
+    assert cue_timings([], 5.0) == []
+    assert cue_timings(["x"], 0.0) == []
 
 
 # ── HuggingFace helpers (pure) ─────────────────────────────────────────────────

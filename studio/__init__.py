@@ -10,6 +10,7 @@ ffmpeg) live in `tools/studio_poc.py` behind the Protocols here, so they swap fr
 from __future__ import annotations
 
 from studio import gemini, huggingface, llm
+from studio.captions import cue_timings, split_caption_cues
 from studio.kenburns import MOTIONS, scene_filter
 from studio.research import ResearchProvider, ResearchSource, format_research_brief
 from studio.run_log import RunManifest, RunRecorder, SceneRecord, new_run_id
@@ -37,6 +38,8 @@ __all__ = [
     "styled_prompt",
     "MOTIONS",
     "scene_filter",
+    "split_caption_cues",
+    "cue_timings",
     "DEMO_STORYBOARD",
     "storyboard_from_dict",
     "SHOT_TYPES",
