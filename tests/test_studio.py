@@ -23,6 +23,7 @@ from studio.llm import (
     extract_message,
     parse_json_block,
 )
+from studio.research import ResearchSource, format_research_brief
 from studio.style import LOCKED_STYLE, styled_prompt
 from studio.types import Scene, Storyboard, shot_uses_character
 
@@ -213,3 +214,23 @@ def test_parse_json_block_handles_bare_object_with_prose():
 def test_parse_json_block_raises_when_no_json():
     with pytest.raises(LLMError):
         parse_json_block("no object here")
+
+
+# ── research brief (pure) ──────────────────────────────────────────────────────
+def test_format_research_brief_numbers_and_cites_sources():
+    srcs = [
+        ResearchSource(title="Sleep study", url="http://a", snippet="5.7-7 hrs", published="2015"),
+        ResearchSource(title="Leisure study", url="http://b", snippet="foragers 20 hrs"),
+    ]
+    brief = format_research_brief(srcs)
+    assert "[1] Sleep study (2015)" in brief and "http://a" in brief
+    assert "[2] Leisure study" in brief and "http://b" in brief
+
+
+def test_format_research_brief_truncates_long_snippets():
+    brief = format_research_brief([ResearchSource(title="T", url="u", snippet="x" * 900)])
+    assert "…" in brief and len(brief) < 900
+
+
+def test_format_research_brief_handles_empty():
+    assert format_research_brief([]) == "(no sources retrieved)"

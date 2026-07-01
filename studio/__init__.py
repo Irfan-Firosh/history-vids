@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from studio import gemini, llm
 from studio.kenburns import MOTIONS, scene_filter
+from studio.research import ResearchProvider, ResearchSource, format_research_brief
 from studio.run_log import RunManifest, RunRecorder, SceneRecord, new_run_id
 from studio.storyboard import DEMO_STORYBOARD
 from studio.style import CONCEPT_STYLE, LOCKED_STYLE, styled_prompt
@@ -28,6 +29,9 @@ __all__ = [
     "Storyboard",
     "ImageProvider",
     "VoiceProvider",
+    "ResearchProvider",
+    "ResearchSource",
+    "format_research_brief",
     "LOCKED_STYLE",
     "CONCEPT_STYLE",
     "styled_prompt",
