@@ -16,6 +16,20 @@ from studio.gemini import (
     parse_image,
 )
 from studio.kenburns import MOTIONS, motion_for_index
+from studio.llm import (
+    LLMError,
+    build_chat_request,
+    chat_endpoint,
+    extract_message,
+    parse_json_block,
+)
+from studio.research import ResearchSource, format_research_brief
+from studio.script_prompt import (
+    QUERY_SYSTEM_PROMPT,
+    SCRIPT_SYSTEM_PROMPT,
+    build_query_user_prompt,
+)
+from studio.storyboard import storyboard_from_dict
 from studio.style import LOCKED_STYLE, styled_prompt
 from studio.types import Scene, Storyboard, shot_uses_character
 
@@ -163,3 +177,126 @@ def test_endpoint_targets_generate_content():
     assert endpoint(DEFAULT_IMAGE_MODEL, "KEY").endswith(
         "gemini-2.5-flash-image:generateContent?key=KEY"
     )
+
+
+# ── LLM script helpers (pure, offline) ─────────────────────────────────────────
+def test_chat_endpoint_appends_path_without_double_slash():
+    assert chat_endpoint("https://x.test/api/") == "https://x.test/api/chat/completions"
+    assert chat_endpoint("https://x.test/api") == "https://x.test/api/chat/completions"
+
+
+def test_build_chat_request_has_system_and_user_messages():
+    body = build_chat_request("gpt-oss:120b", "be brief", "hello", temperature=0.3, max_tokens=100)
+    assert body["model"] == "gpt-oss:120b" and body["stream"] is False
+    assert body["temperature"] == 0.3 and body["max_tokens"] == 100
+    roles = [m["role"] for m in body["messages"]]
+    assert roles == ["system", "user"]
+
+
+def test_extract_message_returns_content():
+    resp = {"choices": [{"message": {"role": "assistant", "content": "hi there"}}]}
+    assert extract_message(resp) == "hi there"
+
+
+def test_extract_message_raises_on_api_error():
+    with pytest.raises(LLMError):
+        extract_message({"error": {"message": "model not found"}})
+
+
+def test_extract_message_raises_on_malformed():
+    with pytest.raises(LLMError):
+        extract_message({"weird": True})
+
+
+def test_parse_json_block_handles_fenced_and_prose():
+    text = 'Sure! Here it is:\n```json\n{"title": "T", "scenes": []}\n```\nHope that helps.'
+    assert parse_json_block(text) == {"title": "T", "scenes": []}
+
+
+def test_parse_json_block_handles_bare_object_with_prose():
+    assert parse_json_block('blah {"a": 1} trailing')["a"] == 1
+
+
+def test_parse_json_block_raises_when_no_json():
+    with pytest.raises(LLMError):
+        parse_json_block("no object here")
+
+
+# ── research brief (pure) ──────────────────────────────────────────────────────
+def test_format_research_brief_numbers_and_cites_sources():
+    srcs = [
+        ResearchSource(title="Sleep study", url="http://a", snippet="5.7-7 hrs", published="2015"),
+        ResearchSource(title="Leisure study", url="http://b", snippet="foragers 20 hrs"),
+    ]
+    brief = format_research_brief(srcs)
+    assert "[1] Sleep study (2015)" in brief and "http://a" in brief
+    assert "[2] Leisure study" in brief and "http://b" in brief
+
+
+def test_format_research_brief_truncates_long_snippets():
+    brief = format_research_brief([ResearchSource(title="T", url="u", snippet="x" * 900)])
+    assert "…" in brief and len(brief) < 900
+
+
+def test_format_research_brief_handles_empty():
+    assert format_research_brief([]) == "(no sources retrieved)"
+
+
+# ── storyboard from LLM JSON ───────────────────────────────────────────────────
+def test_storyboard_from_dict_builds_validated_storyboard():
+    scenes = [
+        {"narration": "You wake up.", "image_prompt": "a stick figure", "shot_type": "character"},
+        {"narration": "A simple map.", "image_prompt": "a flat world map", "shot_type": "map"},
+    ]
+    sb = storyboard_from_dict({"title": "Why You Feel Behind", "scenes": scenes})
+    assert sb.title == "Why You Feel Behind" and len(sb.scenes) == 2
+    assert sb.scenes[1].shot_type == "map" and sb.scenes[0].motion == "static"
+    assert sb.style == LOCKED_STYLE  # default style applied
+
+
+def test_storyboard_from_dict_defaults_shot_type_to_character():
+    data = {"title": "T", "scenes": [{"narration": "n", "image_prompt": "p"}]}
+    assert storyboard_from_dict(data).scenes[0].shot_type == "character"
+
+
+def test_storyboard_from_dict_rejects_invalid_shot_type():
+    bad = {"narration": "n", "image_prompt": "p", "shot_type": "banana"}
+    with pytest.raises(ValidationError):
+        storyboard_from_dict({"title": "T", "scenes": [bad]})
+
+
+def test_storyboard_from_dict_requires_scenes():
+    with pytest.raises(ValueError):
+        storyboard_from_dict({"title": "T", "scenes": []})
+
+
+# ── script prompts (the moat — encode tone + factual constraints) ──────────────
+def test_script_system_prompt_encodes_tone_and_constraints():
+    p = SCRIPT_SYSTEM_PROMPT.lower()
+    assert "calm" in p and "philosophical" in p  # narration tone
+    assert "curiosity" in p and "title" in p  # engaging title
+    assert "only facts" in p and "never invent" in p  # no hallucinated citations
+    assert "shot_type" in p and "json" in p  # structured output
+    assert "text-free" in p  # images never carry drawn text (diffusion garbles it)
+    # brainrot-tuned credibility must NOT tip into a lecture — hard anti-academic guardrail
+    assert "historiography" in p and "professor" in p  # banned register + "not a professor" rail
+    assert "nobody actually agrees" in p  # mystery/debate used as a hook, capped
+    assert "at most once or twice" in p  # the cap that keeps debate framing rare
+    # characters must look true to their culture/era, but only via simple crude markers
+    assert "true to their" in p and "shaggy hair" in p and "fur wrap" in p
+    assert "only humans are stick figures" in p
+
+
+def test_query_system_prompt_seeks_evidence_and_disagreement():
+    q = QUERY_SYSTEM_PROMPT.lower()
+    assert "concrete evidence" in q  # the physical thing, not the method name
+    assert "contested" in q or "argue" in q  # surface genuine disagreements
+    assert "looked" in q and "hairstyle" in q  # also research how the people actually looked
+    user = build_query_user_prompt("Battle of Tsushima", 6)
+    assert "disagree" in user.lower() and "6" in user
+    assert "looked like" in user.lower()  # at least one appearance query
+
+
+def test_build_query_user_prompt_includes_topic_and_count():
+    out = build_query_user_prompt("ancient sleep", 5)
+    assert "ancient sleep" in out and "5" in out

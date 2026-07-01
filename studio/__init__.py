@@ -9,10 +9,11 @@ ffmpeg) live in `tools/studio_poc.py` behind the Protocols here, so they swap fr
 
 from __future__ import annotations
 
-from studio import gemini
+from studio import gemini, llm
 from studio.kenburns import MOTIONS, scene_filter
+from studio.research import ResearchProvider, ResearchSource, format_research_brief
 from studio.run_log import RunManifest, RunRecorder, SceneRecord, new_run_id
-from studio.storyboard import DEMO_STORYBOARD
+from studio.storyboard import DEMO_STORYBOARD, storyboard_from_dict
 from studio.style import CONCEPT_STYLE, LOCKED_STYLE, styled_prompt
 from studio.types import (
     SHOT_TYPES,
@@ -28,15 +29,20 @@ __all__ = [
     "Storyboard",
     "ImageProvider",
     "VoiceProvider",
+    "ResearchProvider",
+    "ResearchSource",
+    "format_research_brief",
     "LOCKED_STYLE",
     "CONCEPT_STYLE",
     "styled_prompt",
     "MOTIONS",
     "scene_filter",
     "DEMO_STORYBOARD",
+    "storyboard_from_dict",
     "SHOT_TYPES",
     "shot_uses_character",
     "gemini",
+    "llm",
     "RunRecorder",
     "RunManifest",
     "SceneRecord",

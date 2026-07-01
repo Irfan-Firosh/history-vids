@@ -32,5 +32,7 @@ extend-exclude = ["result"]  # one-off research/report generators, not product c
 select = ["E", "F", "I", "UP", "B"]
 
 [tool.ruff.lint.per-file-ignores]
+"studio/script_prompt.py" = ["E501"]       # long natural-language prompt-string literals (the moat)
 "tools/studio_poc.py" = ["E402", "E501"]   # sys.path bootstrap; long provider strings/docstrings
 "tools/make_refs.py" = ["E402", "E501"]    # sys.path bootstrap; long reference prompts
+"tools/make_script.py" = ["E402", "E501"]  # sys.path bootstrap; long provider strings/docstrings
