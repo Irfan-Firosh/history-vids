@@ -15,11 +15,14 @@ Providers:
 """
 from __future__ import annotations
 
+import base64
+import json
 import os
 import subprocess
 import sys
 import textwrap
 import time
+import wave
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -235,6 +238,78 @@ class CartesiaVoiceProvider:
         resp.raise_for_status()
         out_path.write_bytes(resp.content)
         return ffprobe_duration(out_path)
+
+
+class CartesiaTimestampVoice:
+    """One-shot Cartesia SSE synth of the WHOLE script → (wav on disk, per-word start/end arrays).
+
+    Uses `/tts/sse` with ``add_timestamps`` so the entire narration is spoken in a single request
+    (natural prosody) and we get the real word timings that drive image cuts + captions. Native
+    ``generation_config.speed`` slows delivery (no atempo artifacts); timestamps track the slowed audio.
+    """
+
+    name = "cartesia-sse"
+
+    def synthesize(
+        self, text: str, out_path: Path
+    ) -> tuple[list[str], list[float], list[float]]:
+        import httpx
+
+        key = os.environ.get("CARTESIA_API_KEY")
+        voice = os.environ.get("CARTESIA_VOICE_ID")
+        if not key or not voice:
+            raise RuntimeError("Set CARTESIA_API_KEY and CARTESIA_VOICE_ID (Carson) in .env.")
+        model = os.environ.get("CARTESIA_SSE_MODEL", "sonic-2")
+        speed = max(0.6, min(1.5, float(os.environ.get("CARTESIA_SPEED", "0.88"))))
+        body = {
+            "model_id": model, "transcript": text,
+            "voice": {"mode": "id", "id": voice},
+            "add_timestamps": True,
+            "generation_config": {"speed": speed},
+            "output_format": {
+                "container": "raw", "encoding": "pcm_s16le", "sample_rate": SAMPLE_RATE,
+            },
+        }
+        pcm = bytearray()
+        words: list[str] = []
+        starts: list[float] = []
+        ends: list[float] = []
+        with httpx.stream(
+            "POST", "https://api.cartesia.ai/tts/sse",
+            headers={"X-API-Key": key, "Cartesia-Version": "2024-11-13",
+                     "Content-Type": "application/json"},
+            json=body, timeout=None,
+        ) as resp:
+            if resp.status_code != 200:
+                raise RuntimeError(f"Cartesia SSE {resp.status_code}: {resp.read()[:300]!r}")
+            for line in resp.iter_lines():
+                if not line or not line.startswith("data:"):
+                    continue
+                payload = line[len("data:"):].strip()
+                if not payload or payload == "[DONE]":
+                    continue
+                msg = json.loads(payload)
+                kind = msg.get("type")
+                if kind == "chunk" and msg.get("data"):
+                    pcm += base64.b64decode(msg["data"])
+                elif kind == "timestamps":
+                    wt = msg.get("word_timestamps") or {}
+                    words += [str(x) for x in wt.get("words", [])]
+                    starts += [float(x) for x in wt.get("start", [])]
+                    ends += [float(x) for x in wt.get("end", [])]
+                if msg.get("done"):
+                    break
+        if not pcm:
+            raise RuntimeError("Cartesia SSE returned no audio.")
+        with wave.open(str(out_path), "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)  # pcm_s16le
+            w.setframerate(SAMPLE_RATE)
+            w.writeframes(bytes(pcm))
+        if not ends:  # no timestamps came back → one full-length span
+            dur = len(pcm) / 2 / SAMPLE_RATE
+            words, starts, ends = [text], [0.0], [dur]
+        return words, starts, ends
 
 
 def concat_audio(wavs: list[Path], out: Path) -> None:
