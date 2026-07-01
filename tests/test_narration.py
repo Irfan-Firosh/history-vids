@@ -6,6 +6,7 @@ from studio.narration import (
     align_beats,
     build_transcript,
     caption_timeline,
+    image_timeline,
 )
 
 
@@ -44,6 +45,26 @@ def test_align_beats_is_word_count_independent_and_covers_the_timeline():
 def test_align_beats_handles_empty_and_degenerate():
     assert align_beats([], [], []) == []
     assert align_beats([1, 1], [], []) == [(0.0, 0.0), (0.0, 0.0)]  # no audio → no time
+
+
+def test_image_timeline_never_repeats_a_frame_file():
+    # No image filename may be scheduled in more than one segment (repeats look cheap).
+    segs = image_timeline([(0.0, 32.0), (32.0, 48.0), (48.0, 56.0)], [4, 2, 1])
+    names = [s[0] for s in segs]
+    assert len(names) == len(set(names))  # all distinct
+
+
+def test_image_timeline_covers_each_beat_contiguously():
+    spans = [(0.0, 4.0), (4.0, 9.0)]
+    segs = image_timeline(spans, [1, 1])
+    assert segs[0][1] == 0.0 and segs[-1][2] == 9.0
+    for (_, _, e), (_, s, _) in zip(segs, segs[1:], strict=False):
+        assert abs(e - s) < 1e-6
+
+
+def test_image_timeline_one_frame_per_beat_is_single_hold():
+    assert image_timeline([(0.0, 5.0)], [1]) == [("img_0.png", 0.0, 5.0)]
+    assert image_timeline([(0.0, 5.0)], [0]) == [("img_0.png", 0.0, 5.0)]  # coerced to ≥1
 
 
 # ── caption_timeline ─────────────────────────────────────────────────────────

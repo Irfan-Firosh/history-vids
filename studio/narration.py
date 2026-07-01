@@ -102,3 +102,26 @@ def caption_timeline(
         for (cue_start, cue_end), cue in zip(cue_timings(cues, end - start), cues, strict=False):
             out.append((cue, round(start + cue_start, 3), round(start + cue_end, 3)))
     return out
+
+
+def image_timeline(
+    beat_spans: Sequence[tuple[float, float]],
+    frames_per_beat: Sequence[int],
+) -> list[tuple[str, float, float]]:
+    """The on-screen image schedule as (image_filename, start, end), by the file-name convention.
+
+    Each beat span is split into ``frames_per_beat[i]`` equal, contiguous holds. The first frame is
+    ``img_{i}.png``; extra frames are ``img_{i}_{k}.png`` (k = 1, 2, …) — each a DISTINCT image, so
+    adjacent segments are never the same file (no cut-back). Callers size the count so every hold is
+    ≥ :data:`MIN_FRAME_HOLD` (fresh render → ``frames_for_span``; re-edit → frames already on disk).
+    """
+    segs: list[tuple[str, float, float]] = []
+    for i, ((start, end), nframes) in enumerate(zip(beat_spans, frames_per_beat, strict=False)):
+        n = max(1, int(nframes))
+        step = (end - start) / n
+        for k in range(n):
+            seg_start = start if k == 0 else round(start + k * step, 3)
+            seg_end = end if k == n - 1 else round(start + (k + 1) * step, 3)
+            name = f"img_{i}.png" if k == 0 else f"img_{i}_{k}.png"
+            segs.append((name, seg_start, seg_end))
+    return segs
