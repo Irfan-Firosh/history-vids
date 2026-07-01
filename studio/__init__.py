@@ -13,7 +13,7 @@ from studio import gemini, llm
 from studio.kenburns import MOTIONS, scene_filter
 from studio.research import ResearchProvider, ResearchSource, format_research_brief
 from studio.run_log import RunManifest, RunRecorder, SceneRecord, new_run_id
-from studio.storyboard import DEMO_STORYBOARD
+from studio.storyboard import DEMO_STORYBOARD, storyboard_from_dict
 from studio.style import CONCEPT_STYLE, LOCKED_STYLE, styled_prompt
 from studio.types import (
     SHOT_TYPES,
@@ -38,6 +38,7 @@ __all__ = [
     "MOTIONS",
     "scene_filter",
     "DEMO_STORYBOARD",
+    "storyboard_from_dict",
     "SHOT_TYPES",
     "shot_uses_character",
     "gemini",

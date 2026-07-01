@@ -7,6 +7,7 @@ produced by an `LLMScriptProvider` (core.llm); here it's hardcoded so the PoC ru
 
 from __future__ import annotations
 
+import sys
 
 from studio.style import LOCKED_STYLE
 from studio.types import Scene, Storyboard
@@ -60,3 +61,51 @@ DEMO_STORYBOARD = Storyboard(
         for n, p, st, em in _BEATS
     ),
 )
+
+
+def storyboard_from_dict(data: dict, default_style: str = LOCKED_STYLE) -> Storyboard:
+    """Build a validated `Storyboard` from an LLM's JSON (see `studio.llm.parse_json_block`).
+
+    Expects ``{"title": str, "scenes": [{"narration", "image_prompt", "shot_type"?}, ...]}``.
+
+    The local model occasionally emits a *partial* beat (e.g. missing ``image_prompt`` or
+    ``narration``) — one such beat used to `KeyError` and abort the whole run. Instead we DROP any
+    beat that isn't a dict with both required fields (a beat with no image can't be rendered and one
+    with no narration has no audio), keep the rest, and warn to stderr so the data-quality dip is
+    visible rather than silent. If nothing usable survives we still fail loudly.
+    """
+    raw_scenes = data.get("scenes")
+    if not isinstance(raw_scenes, list) or not raw_scenes:
+        raise ValueError("storyboard JSON needs a non-empty 'scenes' list")
+    scenes: list[Scene] = []
+    dropped = 0
+    for s in raw_scenes:  # a legacy "cutaways" key, if present, is simply ignored
+        narration = (s.get("narration") or "").strip() if isinstance(s, dict) else ""
+        image_prompt = (s.get("image_prompt") or "").strip() if isinstance(s, dict) else ""
+        if not narration or not image_prompt:  # partial/garbled beat from the LLM → skip it
+            dropped += 1
+            continue
+        scenes.append(
+            Scene(
+                narration=narration,
+                image_prompt=image_prompt,
+                shot_type=s.get("shot_type") or "character",
+                cite=tuple(s.get("cite") or ()),
+                emphasis=(s.get("emphasis") or "").strip(),
+                intense=bool(s.get("intense", False)),
+                motion="static",
+            )
+        )
+    if dropped:
+        print(
+            f"  ⚠ storyboard: skipped {dropped} malformed beat(s) missing narration/image_prompt "
+            f"({len(scenes)} usable)",
+            file=sys.stderr,
+        )
+    if not scenes:
+        raise ValueError("storyboard JSON had no usable scenes (need narration + image_prompt)")
+    return Storyboard(
+        title=(data.get("title") or "(untitled)"),
+        style=data.get("style") or default_style,
+        scenes=tuple(scenes),
+    )

@@ -29,6 +29,7 @@ from studio.script_prompt import (
     SCRIPT_SYSTEM_PROMPT,
     build_query_user_prompt,
 )
+from studio.storyboard import storyboard_from_dict
 from studio.style import LOCKED_STYLE, styled_prompt
 from studio.types import Scene, Storyboard, shot_uses_character
 
@@ -239,6 +240,34 @@ def test_format_research_brief_truncates_long_snippets():
 
 def test_format_research_brief_handles_empty():
     assert format_research_brief([]) == "(no sources retrieved)"
+
+
+# ── storyboard from LLM JSON ───────────────────────────────────────────────────
+def test_storyboard_from_dict_builds_validated_storyboard():
+    scenes = [
+        {"narration": "You wake up.", "image_prompt": "a stick figure", "shot_type": "character"},
+        {"narration": "A simple map.", "image_prompt": "a flat world map", "shot_type": "map"},
+    ]
+    sb = storyboard_from_dict({"title": "Why You Feel Behind", "scenes": scenes})
+    assert sb.title == "Why You Feel Behind" and len(sb.scenes) == 2
+    assert sb.scenes[1].shot_type == "map" and sb.scenes[0].motion == "static"
+    assert sb.style == LOCKED_STYLE  # default style applied
+
+
+def test_storyboard_from_dict_defaults_shot_type_to_character():
+    data = {"title": "T", "scenes": [{"narration": "n", "image_prompt": "p"}]}
+    assert storyboard_from_dict(data).scenes[0].shot_type == "character"
+
+
+def test_storyboard_from_dict_rejects_invalid_shot_type():
+    bad = {"narration": "n", "image_prompt": "p", "shot_type": "banana"}
+    with pytest.raises(ValidationError):
+        storyboard_from_dict({"title": "T", "scenes": [bad]})
+
+
+def test_storyboard_from_dict_requires_scenes():
+    with pytest.raises(ValueError):
+        storyboard_from_dict({"title": "T", "scenes": []})
 
 
 # ── script prompts (the moat — encode tone + factual constraints) ──────────────
