@@ -24,6 +24,11 @@ from studio.llm import (
     parse_json_block,
 )
 from studio.research import ResearchSource, format_research_brief
+from studio.script_prompt import (
+    QUERY_SYSTEM_PROMPT,
+    SCRIPT_SYSTEM_PROMPT,
+    build_query_user_prompt,
+)
 from studio.style import LOCKED_STYLE, styled_prompt
 from studio.types import Scene, Storyboard, shot_uses_character
 
@@ -234,3 +239,35 @@ def test_format_research_brief_truncates_long_snippets():
 
 def test_format_research_brief_handles_empty():
     assert format_research_brief([]) == "(no sources retrieved)"
+
+
+# ── script prompts (the moat — encode tone + factual constraints) ──────────────
+def test_script_system_prompt_encodes_tone_and_constraints():
+    p = SCRIPT_SYSTEM_PROMPT.lower()
+    assert "calm" in p and "philosophical" in p  # narration tone
+    assert "curiosity" in p and "title" in p  # engaging title
+    assert "only facts" in p and "never invent" in p  # no hallucinated citations
+    assert "shot_type" in p and "json" in p  # structured output
+    assert "text-free" in p  # images never carry drawn text (diffusion garbles it)
+    # brainrot-tuned credibility must NOT tip into a lecture — hard anti-academic guardrail
+    assert "historiography" in p and "professor" in p  # banned register + "not a professor" rail
+    assert "nobody actually agrees" in p  # mystery/debate used as a hook, capped
+    assert "at most once or twice" in p  # the cap that keeps debate framing rare
+    # characters must look true to their culture/era, but only via simple crude markers
+    assert "true to their" in p and "shaggy hair" in p and "fur wrap" in p
+    assert "only humans are stick figures" in p
+
+
+def test_query_system_prompt_seeks_evidence_and_disagreement():
+    q = QUERY_SYSTEM_PROMPT.lower()
+    assert "concrete evidence" in q  # the physical thing, not the method name
+    assert "contested" in q or "argue" in q  # surface genuine disagreements
+    assert "looked" in q and "hairstyle" in q  # also research how the people actually looked
+    user = build_query_user_prompt("Battle of Tsushima", 6)
+    assert "disagree" in user.lower() and "6" in user
+    assert "looked like" in user.lower()  # at least one appearance query
+
+
+def test_build_query_user_prompt_includes_topic_and_count():
+    out = build_query_user_prompt("ancient sleep", 5)
+    assert "ancient sleep" in out and "5" in out
