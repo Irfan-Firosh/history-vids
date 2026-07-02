@@ -7,6 +7,7 @@ import base64
 import pytest
 
 from studio import agnes
+from tools.studio_poc import build_providers, make_image_provider, providers_from_roles
 
 
 # ── pure request/response helpers ──────────────────────────────────────────────
@@ -38,3 +39,19 @@ def test_extract_returns_url_when_no_b64():
 def test_extract_raises_when_empty():
     with pytest.raises(agnes.AgnesError):
         agnes.extract({"data": [{}]})
+
+
+# ── per-role provider selection ────────────────────────────────────────────────
+def test_providers_from_roles_maps_each_role():
+    p = providers_from_roles("agnes", "gemini")
+    assert (p.character.name, p.concept.name) == ("agnes", "gemini")
+
+
+def test_agnes_mode_uses_agnes_everywhere():
+    p = build_providers("agnes")
+    assert p.character.name == p.concept.name == "agnes"
+
+
+def test_make_image_provider_rejects_unknown():
+    with pytest.raises(ValueError):
+        make_image_provider("midjourney")

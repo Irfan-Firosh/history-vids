@@ -26,6 +26,7 @@ import unicodedata
 import wave
 from collections.abc import Sequence
 from pathlib import Path
+from typing import NamedTuple
 
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT))
@@ -573,3 +574,61 @@ def concat_audio(wavs: list[Path], out: Path) -> None:
 def load_channel_refs() -> list[Path]:
     """The committed character references passed on character/wide shots (if present)."""
     return [p for p in (REFS_DIR / "character.png", REFS_DIR / "expressions.png") if p.exists()]
+
+
+#: Providers that condition on a reference image to keep the recurring character on-model
+#: (Gemini reference-conditioning, Cloudflare FLUX.2 input images, Agnes image-to-image).
+REF_CAPABLE = frozenset({"gemini", "cloudflare", "agnes"})
+
+#: Every selectable image provider by name → constructor. `cloudflare` (slow/capacity-unreliable)
+#: and `hf` (weaker quality) are kept working but are NOT offered on the dashboard picker — Gemini
+#: and Agnes are the recommended providers (see context/project/roadmap.md).
+IMAGE_PROVIDERS = {
+    "placeholder": PlaceholderImageProvider,
+    "gemini": GeminiImageProvider,
+    "agnes": AgnesImageProvider,
+    "hf": HuggingFaceImageProvider,
+    "cloudflare": CloudflareImageProvider,
+}
+IMAGE_PROVIDER_NAMES = tuple(IMAGE_PROVIDERS)
+
+
+class ImageProviders(NamedTuple):
+    """One provider per image role. `character` gets reference images (character/wide shots);
+    `concept` renders concept/map shots. Images stay text-free — there is no cutaway role."""
+
+    character: object
+    concept: object
+
+
+def make_image_provider(name: str):
+    """Instantiate an image provider by name (raises ValueError on an unknown name)."""
+    try:
+        return IMAGE_PROVIDERS[name]()
+    except KeyError:
+        raise ValueError(f"unknown image provider {name!r}; choose from {IMAGE_PROVIDER_NAMES}") from None
+
+
+def providers_from_roles(character: str, concept: str) -> ImageProviders:
+    """Build an :class:`ImageProviders` from a per-role provider-name choice (the new run page)."""
+    return ImageProviders(make_image_provider(character), make_image_provider(concept))
+
+
+def build_providers(mode: str) -> ImageProviders:
+    """Legacy single-mode shorthand → an :class:`ImageProviders` (character / concept).
+
+    * ``gemini``     — Gemini character + HuggingFace FLUX (free) concept.
+    * ``agnes``      — Agnes for both roles (recommended: free, fast, on-style, image-to-image refs).
+    * ``cloudflare`` — Cloudflare FLUX.2 [dev] character + Gemini concept. (not offered in UI)
+    * ``hf``         — HuggingFace FLUX for both (free, no character consistency). (not in UI)
+    * else           — Placeholder (free/offline default).
+    """
+    if mode == "gemini":
+        return ImageProviders(GeminiImageProvider(), HuggingFaceImageProvider())
+    if mode == "agnes":
+        return providers_from_roles("agnes", "agnes")
+    if mode == "cloudflare":
+        return ImageProviders(CloudflareImageProvider(), GeminiImageProvider())
+    if mode == "hf":
+        return providers_from_roles("hf", "hf")
+    return providers_from_roles("placeholder", "placeholder")

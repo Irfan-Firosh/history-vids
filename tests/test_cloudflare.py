@@ -7,6 +7,7 @@ import base64
 import pytest
 
 from studio import cloudflare
+from tools.studio_poc import build_providers
 
 
 def test_run_endpoint_builds_account_and_model_path():
@@ -28,3 +29,14 @@ def test_parse_image_raises_on_error_envelope():
 def test_parse_image_raises_when_no_image():
     with pytest.raises(cloudflare.CloudflareError):
         cloudflare.parse_image({"success": True, "result": {}})
+
+
+def test_cloudflare_mode_routes_flux2_char_and_gemini_concept():
+    # Chosen routing: FLUX.2 [dev] for the character, Gemini for concept/map.
+    p = build_providers("cloudflare")
+    assert p.character.name == "cloudflare" and p.concept.name == "gemini"
+
+
+def test_gemini_mode_unchanged():
+    p = build_providers("gemini")
+    assert p.character.name == "gemini" and p.concept.name == "hf"
