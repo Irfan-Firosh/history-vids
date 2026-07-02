@@ -1,5 +1,15 @@
 # Lessons
 
+## 2026-07-02 — Provider retry must cover NETWORK exceptions, not just HTTP status codes
+**Correction:** A 43-frame Agnes render failed at scene 5 with `httpx` "Server disconnected without
+sending a response." The provider only retried on 429/5xx *status codes*, so a transport-level
+exception (RemoteProtocolError/ConnectError/timeout) propagated and killed the whole run.
+**Rule:** Any provider hitting a flaky third-party API over a long, many-call run must wrap the request
+in `try/except httpx.RequestError` and retry those too (backoff), alongside 429 (honour `Retry-After`)
+and 5xx. Long runs (dozens/hundreds of calls) make a transient disconnect near-certain — one un-retried
+blip must not abort the batch. Bump the retry budget for long runs; consider an optional min-interval
+throttle to stay under RPM.
+
 ## 2026-06-27 — Separate shared infra from domain logic when scoping a pivot
 **Correction:** When proposing the Shorts pivot (D2), I framed it as "reuse ~70% of the engine,"
 which lumped *discovery* in with infrastructure. The user clarified: shared **infra** (env keys, the
