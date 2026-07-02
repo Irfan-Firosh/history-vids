@@ -40,6 +40,43 @@ def test_index_serves_html(client):
     assert r.status_code == 200 and "Pipeline Runs" in r.text
 
 
+def test_new_run_page_serves(client):
+    r = client.get("/new")
+    assert r.status_code == 200 and "New Run" in r.text
+
+
+def test_per_role_models_build_command(client, monkeypatch):
+    """The new run page's per-role selection maps to --char-model / --concept-model flags."""
+    captured: dict = {}
+
+    class FakeProc:
+        def poll(self):
+            return None
+
+    def fake_popen(cmd, *a, **k):
+        captured["cmd"] = cmd
+        return FakeProc()
+
+    monkeypatch.setattr(dash.subprocess, "Popen", fake_popen)
+    r = client.post("/api/runs", json={
+        "char_model": "gemini", "concept_model": "agnes", "voice": "cartesia",
+    })
+    assert r.status_code == 201
+    cmd = captured["cmd"]
+    assert "--char-model" in cmd and cmd[cmd.index("--char-model") + 1] == "gemini"
+    assert cmd[cmd.index("--concept-model") + 1] == "agnes"
+    assert "--images" not in cmd  # per-role takes precedence over the legacy shorthand
+
+
+def test_agnes_is_an_accepted_provider(client, monkeypatch):
+    class FakeProc:
+        def poll(self):
+            return None
+
+    monkeypatch.setattr(dash.subprocess, "Popen", lambda *a, **k: FakeProc())
+    assert client.post("/api/runs", json={"images": "agnes"}).status_code == 201
+
+
 def test_list_runs_summarises(client):
     runs = client.get("/api/runs").json()
     assert len(runs) == 1
@@ -58,6 +95,38 @@ def test_traversal_is_blocked(client):
     # Even a crafted name must not escape the run dir.
     r = client.get("/api/runs/20260101-000000/file/..%2f..%2frun.json")
     assert r.status_code == 404
+
+
+def test_trigger_locks_to_one_run(client, monkeypatch):
+    class FakeProc:
+        def __init__(self, *a, **k):
+            self._done = False
+
+        def poll(self):
+            return None if not self._done else 0
+
+    created: list[FakeProc] = []
+
+    def fake_popen(*a, **k):
+        p = FakeProc()
+        created.append(p)
+        return p
+
+    monkeypatch.setattr(dash.subprocess, "Popen", fake_popen)
+
+    first = client.post("/api/runs", json={"images": "placeholder", "voice": "say"})
+    assert first.status_code == 201 and first.json()["run_id"]
+
+    # Second trigger while the first is live → 409.
+    assert client.post("/api/runs", json={}).status_code == 409
+
+    # Once the first finishes, a new run is allowed.
+    created[0]._done = True
+    assert client.post("/api/runs", json={}).status_code == 201
+
+
+def test_invalid_provider_rejected(client):
+    assert client.post("/api/runs", json={"images": "dalle"}).status_code == 422
 
 
 def test_delete_missing_run_is_404(client):
