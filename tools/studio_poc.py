@@ -32,6 +32,7 @@ sys.path.insert(0, str(_ROOT))
 
 
 from studio import (  # noqa: E402
+    agnes,
     cloudflare,
     gemini,
     huggingface,
@@ -267,6 +268,133 @@ class CloudflareImageProvider:
             raise RuntimeError(
                 f"Cloudflare Workers AI image failed ({self.model}): {resp.status_code} {resp.text[:200]}"
             )
+        raise RuntimeError("unreachable")  # pragma: no cover
+
+
+class AgnesImageProvider:
+    """Agnes Image 2.1 Flash (Sapiens AI) — text-to-image + image-to-image. Needs AGNES_API_KEY.
+
+    Free/fast/on-style and OpenAI-compatible. When `refs` are supplied (character/wide shots) it does
+    **image-to-image** off the reference(s) for consistency; otherwise plain text-to-image. Has an
+    **RPM limit**, so requests retry with backoff (honouring ``Retry-After``) on 429 / 5xx AND on
+    network errors (disconnect/timeout) — important for long, many-frame runs. Pure request/parse
+    logic lives in ``studio.agnes``.
+    """
+
+    name = "agnes"
+
+    #: Documented free-tier rate limit (wiki.agnes-ai.com error codes): 20 requests / minute.
+    FREE_RPM = 20
+
+    def __init__(self, model: str | None = None, size: str | None = None, max_retries: int = 8):
+        self.model = model or os.environ.get("AGNES_IMAGE_MODEL", agnes.DEFAULT_MODEL)
+        self.size = size or os.environ.get("AGNES_SIZE", agnes.DEFAULT_SIZE)
+        self.max_retries = int(os.environ.get("AGNES_MAX_RETRIES", max_retries))
+        # Floor delay between request STARTS so we never exceed the RPM limit (60/RPM = 3s at RPM 20),
+        # even when retries would otherwise burst. Serial gen is already ~15-30s/call so this rarely bites.
+        default_interval = 60.0 / max(1, self.FREE_RPM)
+        self.min_interval = float(os.environ.get("AGNES_MIN_INTERVAL", str(default_interval)))
+        self._last_call = 0.0
+        # Agnes's image-to-image (reference-upload) path is unreliable/slow — it hangs where plain
+        # text-to-image succeeds. Default to text-to-image (ignore refs); set AGNES_IMG2IMG=1 to re-enable.
+        self.use_img2img = os.environ.get("AGNES_IMG2IMG", "0") == "1"
+
+    def _data_uri(self, path: Path) -> str:
+        """A reference image as a base64 PNG data URI (downscaled to keep the payload sane)."""
+        import base64 as _b64
+        import io
+
+        from PIL import Image
+
+        im = Image.open(path).convert("RGB")
+        im.thumbnail((1024, 1024))
+        buf = io.BytesIO()
+        im.save(buf, format="PNG")
+        return "data:image/png;base64," + _b64.b64encode(buf.getvalue()).decode()
+
+    def _build_body(self, prompt: str, refs: Sequence[Path]) -> dict:
+        if refs and self.use_img2img:  # character/wide → image-to-image off the reference(s)
+            return agnes.image_to_image_body(
+                prompt, [self._data_uri(Path(r)) for r in refs], self.size, self.model
+            )
+        # text-to-image (reliable path); consistency comes from the prompt + locked style
+        return agnes.text_to_image_body(prompt, self.size, self.model)
+
+    def _request_bytes(self, headers: dict, body: dict) -> bytes:
+        """POST ONE prompt and return the image bytes. Retries 429 / 5xx / network errors with
+        backoff (honouring the RPM throttle); raises :class:`agnes.ContentPolicyError` when Agnes
+        blocks the prompt itself (so the caller can soften + retry) and ``RuntimeError`` otherwise."""
+        import httpx
+
+        if self.min_interval > 0:  # throttle to stay under the per-minute rate limit
+            gap = self.min_interval - (time.monotonic() - self._last_call)
+            if gap > 0:
+                time.sleep(gap)
+
+        last = "no attempt made"
+        for attempt in range(self.max_retries):
+            self._last_call = time.monotonic()
+            try:
+                resp = httpx.post(agnes.ENDPOINT, headers=headers, json=body, timeout=360)
+            except httpx.RequestError as err:  # disconnect / timeout / connect / read — all transient
+                last = f"network {type(err).__name__}"
+                if attempt == self.max_retries - 1:
+                    break
+                time.sleep(min(2**attempt, 30))
+                continue
+            if resp.status_code == 200:
+                img, url = agnes.extract(resp.json())
+                if img is None and url:  # URL output → fetch the bytes
+                    img = httpx.get(url, timeout=120).content
+                return img
+            if resp.status_code == 429 or resp.status_code >= 500:  # RPM rate limit / transient 5xx
+                last = f"{resp.status_code} {resp.text[:120]}"
+                if attempt == self.max_retries - 1:
+                    break
+                # 429 = RPM limit: honour Retry-After, else back off up to ~60s (docs: "wait 1 minute").
+                # 5xx = transient: shorter backoff.
+                retry_after = resp.headers.get("retry-after") or resp.headers.get("x-ratelimit-reset")
+                cap = 60 if resp.status_code == 429 else 30
+                wait = float(retry_after) if retry_after else min(2 ** (attempt + 2), cap)
+                time.sleep(wait)
+                continue
+            # Non-retryable HTTP. A prompt content-policy block is special — signal the caller to
+            # soften the prompt and try again (a plain retry of the same prompt just fails again).
+            try:
+                detail: dict | str = resp.json()
+            except ValueError:
+                detail = resp.text
+            if agnes.is_content_policy_error(resp.status_code, detail):
+                raise agnes.ContentPolicyError(resp.text[:200])
+            raise RuntimeError(f"Agnes image failed: {resp.status_code} {resp.text[:200]}")
+        raise RuntimeError(f"Agnes image failed after {self.max_retries} attempts: {last}")
+
+    def generate(self, prompt: str, out_path: Path, refs: Sequence[Path] = ()) -> Path:
+        key = os.environ.get("AGNES_API_KEY")
+        if not key:
+            raise RuntimeError("Set AGNES_API_KEY in .env to use Agnes images.")
+        headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+        # Try the original prompt first; if Agnes blocks it on CONTENT POLICY, retry with a
+        # progressively softened prompt (graphic words neutralised + a safety note) instead of
+        # failing the run — a plain retry of the same prompt would only be blocked again.
+        variants = [prompt] + [agnes.soften_prompt(prompt, lvl) for lvl in (1, 2, 3)]
+        for vi, variant in enumerate(variants):
+            try:
+                img = self._request_bytes(headers, self._build_body(variant, refs))
+            except agnes.ContentPolicyError:
+                if vi == len(variants) - 1:
+                    raise agnes.ContentPolicyError(
+                        "Agnes blocked this prompt on content policy even after softening it "
+                        f"{len(variants) - 1}x; the subject is likely too graphic to depict."
+                    ) from None
+                print(
+                    "  ⚠ Agnes content-policy block — softening the prompt & retrying "
+                    f"(attempt {vi + 2}/{len(variants)})",
+                    file=sys.stderr,
+                )
+                continue
+            out_path.write_bytes(img)
+            return out_path
         raise RuntimeError("unreachable")  # pragma: no cover
 
 
