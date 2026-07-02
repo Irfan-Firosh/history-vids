@@ -32,6 +32,7 @@ sys.path.insert(0, str(_ROOT))
 
 
 from studio import (  # noqa: E402
+    cloudflare,
     gemini,
     huggingface,
 )
@@ -194,6 +195,79 @@ class HuggingFaceImageProvider:
                 last = f"{resp.status_code} {resp.text[:150]}"
                 break  # try the next endpoint
         raise RuntimeError(f"HuggingFace image failed ({self.model}): {last}")
+
+
+class CloudflareImageProvider:
+    """Cloudflare Workers AI **FLUX.2 [dev]** — text-to-image + up to 4 reference images for
+    character consistency (the Cloudflare-billed counterpart to Gemini). Needs CLOUDFLARE_ACCOUNT_ID
+    + CLOUDFLARE_API_TOKEN.
+
+    `refs` (REF-1 character sheet, REF-2 expressions) are downscaled to < 512px and sent as
+    ``input_image_0..N`` in a multipart request, so the recurring stick-figure stays on-model. Pure
+    endpoint/parse logic lives in ``studio.cloudflare``; this is the httpx side-effect wrapper.
+    """
+
+    name = "cloudflare"
+
+    # FLUX.2 [dev] is popular + capacity-constrained (frequent 429 "capacity exceeded" / 424 routing),
+    # and each generation is slow (~1-2 min under load), so retry generously — rejections are instant.
+    def __init__(self, model: str | None = None, steps: int | None = None, max_retries: int = 6):
+        self.model = model or os.environ.get("CF_IMAGE_MODEL", cloudflare.DEFAULT_IMAGE_MODEL)
+        self.steps = steps or int(os.environ.get("CF_FLUX_STEPS", cloudflare.DEFAULT_STEPS))
+        self.width = int(os.environ.get("CF_IMAGE_WIDTH", cloudflare.DEFAULT_WIDTH))
+        self.height = int(os.environ.get("CF_IMAGE_HEIGHT", cloudflare.DEFAULT_HEIGHT))
+        self.max_retries = max_retries
+
+    def _reference_jpeg(self, path: Path) -> bytes:
+        """Downscale a reference image to < 512px (FLUX.2's input limit) as JPEG bytes."""
+        import io
+
+        from PIL import Image
+
+        im = Image.open(path).convert("RGB")
+        im.thumbnail((cloudflare.REFERENCE_MAX_DIM, cloudflare.REFERENCE_MAX_DIM))
+        buf = io.BytesIO()
+        im.save(buf, format="JPEG", quality=90)
+        return buf.getvalue()
+
+    def generate(self, prompt: str, out_path: Path, refs: Sequence[Path] = ()) -> Path:
+        import httpx
+
+        acct = os.environ.get("CLOUDFLARE_ACCOUNT_ID")
+        token = os.environ.get("CLOUDFLARE_API_TOKEN")
+        if not acct or not token:
+            raise RuntimeError(
+                "Set CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN in .env to use Cloudflare Workers AI."
+            )
+        url = cloudflare.run_endpoint(acct, self.model)
+        # multipart: scalar fields as (None, value), each reference as a file part input_image_N.
+        parts: list = [
+            ("prompt", (None, prompt)),
+            ("steps", (None, str(self.steps))),
+            ("width", (None, str(self.width))),
+            ("height", (None, str(self.height))),
+        ]
+        for i, r in enumerate(list(refs)[: cloudflare.MAX_REFERENCE_IMAGES]):
+            parts.append((f"input_image_{i}", (f"ref_{i}.jpg", self._reference_jpeg(Path(r)), "image/jpeg")))
+        headers = {"Authorization": f"Bearer {token}"}
+
+        for attempt in range(self.max_retries):
+            resp = httpx.post(url, headers=headers, files=parts, timeout=300)
+            ctype = resp.headers.get("content-type", "")
+            if resp.status_code == 200 and ctype.startswith("image/"):
+                out_path.write_bytes(resp.content)
+                return out_path
+            if resp.status_code == 200 and ctype.startswith("application/json"):
+                out_path.write_bytes(cloudflare.parse_image(resp.json()))  # base64 in result.image
+                return out_path
+            # 424 = "could not route request to AI model" (transient Workers AI routing/warmup).
+            if resp.status_code in (424, 429, 500, 502, 503) and attempt < self.max_retries - 1:
+                time.sleep(min(2**attempt, 8))  # transient overload / model warmup / routing
+                continue
+            raise RuntimeError(
+                f"Cloudflare Workers AI image failed ({self.model}): {resp.status_code} {resp.text[:200]}"
+            )
+        raise RuntimeError("unreachable")  # pragma: no cover
 
 
 # ── Voice providers ──────────────────────────────────────────────────────────
