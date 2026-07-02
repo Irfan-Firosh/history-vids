@@ -9,7 +9,7 @@ ffmpeg) live in `tools/studio_poc.py` behind the Protocols here, so they swap fr
 
 from __future__ import annotations
 
-from studio import cloudflare, gemini, huggingface, llm
+from studio import agnes, cloudflare, gemini, huggingface, llm
 from studio.captions import cue_timings, split_caption_cues
 from studio.kenburns import MOTIONS, scene_filter
 from studio.narration import align_beats, build_transcript, caption_timeline, image_timeline
@@ -49,6 +49,7 @@ __all__ = [
     "storyboard_from_dict",
     "SHOT_TYPES",
     "shot_uses_character",
+    "agnes",
     "cloudflare",
     "gemini",
     "huggingface",

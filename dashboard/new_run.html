@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>New Run</title>
+<style>
+  :root { --bg:#fff; --fg:#000; --line:#000; --muted:#555; --hover:#f0f0f0; }
+  html[data-theme="dark"] { --bg:#0a0a0a; --fg:#e8e8e8; --line:#e8e8e8; --muted:#888; --hover:#161616; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+    font:13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  header { display:flex; gap:12px; align-items:center; padding:12px 16px; border-bottom:2px solid var(--line); }
+  header h1 { font-size:14px; margin:0; letter-spacing:.5px; text-transform:uppercase; }
+  header .spacer { flex:1; }
+  a { color:var(--fg); }
+  main { max-width:640px; margin:0 auto; padding:24px 16px; }
+  label { display:block; text-transform:uppercase; font-size:11px; letter-spacing:.5px; color:var(--muted); margin-bottom:4px; }
+  select, button, input[type=text] { font:inherit; background:var(--bg); color:var(--fg);
+    border:1px solid var(--line); padding:6px 8px; border-radius:0; width:100%; }
+  button { cursor:pointer; width:auto; }
+  button:hover:not(:disabled) { background:var(--fg); color:var(--bg); }
+  button:disabled { color:var(--muted); border-color:var(--muted); cursor:not-allowed; }
+  .field { margin-bottom:16px; }
+  .roles { border:1px solid var(--line); }
+  .role { display:grid; grid-template-columns:1fr 200px; gap:10px; align-items:center;
+    padding:10px 12px; border-bottom:1px solid var(--line); }
+  .role:last-child { border-bottom:0; }
+  .role .desc { font-size:11px; color:var(--muted); }
+  .role .name { font-weight:bold; text-transform:none; }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .rec { border:1px solid var(--line); padding:10px 12px; margin-bottom:16px; }
+  .rec .t { text-transform:uppercase; font-size:11px; letter-spacing:.5px; }
+  #status { font-size:12px; color:var(--muted); min-height:18px; margin-top:10px; }
+  h2 { font-size:12px; text-transform:uppercase; letter-spacing:.5px; border-bottom:1px solid var(--line);
+    padding-bottom:4px; margin:0 0 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>New Run</h1>
+  <span class="spacer"></span>
+  <a href="/">← back to runs</a>
+  <button id="theme-btn" title="toggle dark / light">◐ theme</button>
+</header>
+
+<main>
+  <div class="rec">
+    <div class="t">Recommended</div>
+    <div class="desc" style="font-size:12px;color:var(--muted);margin:4px 0 8px;">
+      Agnes for every image role (free · fast · on-style · reference-conditioned) + Cartesia voice.
+    </div>
+    <button id="rec-btn">Use recommended preset</button>
+  </div>
+
+  <div class="field">
+    <label for="topic">Topic (optional)</label>
+    <input type="text" id="topic" placeholder="leave blank to render the demo storyboard" />
+  </div>
+
+  <div class="field">
+    <label>Target length (minutes) — for topic runs</label>
+    <div class="row">
+      <input type="text" id="min_minutes" value="6" style="width:64px" /> <span class="desc">min</span>
+      <input type="text" id="max_minutes" value="9" style="width:64px" /> <span class="desc">max</span>
+    </div>
+  </div>
+
+  <h2>Image models — per role</h2>
+  <div class="roles">
+    <div class="role">
+      <div><div class="name">Character / wide</div><div class="desc">recurring character — reference-conditioned for consistency</div></div>
+      <select id="char_model"></select>
+    </div>
+    <div class="role">
+      <div><div class="name">Concept / map</div><div class="desc">props, symbols, geography (no character) — emphasis is baked into the frame</div></div>
+      <select id="concept_model"></select>
+    </div>
+  </div>
+
+  <h2 style="margin-top:20px;">Voice &amp; options</h2>
+  <div class="field">
+    <label for="voice">Voice</label>
+    <select id="voice">
+      <option value="cartesia" selected>cartesia (Carson)</option>
+      <option value="say">say (macOS, offline)</option>
+    </select>
+  </div>
+  <div class="field row">
+    <label style="margin:0;"><input type="checkbox" id="captions" checked style="width:auto;" /> subtitles</label>
+  </div>
+
+  <button id="start-btn">▶ Start run</button>
+  <div id="status"></div>
+</main>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const IMAGE_MODELS = ["agnes", "gemini"];  // offered providers (cloudflare/hf kept in code, not offered)
+const ROLE_IDS = ["char_model", "concept_model"];
+
+function applyTheme(t){ document.documentElement.dataset.theme=t; localStorage.setItem("theme",t); }
+$("#theme-btn").onclick = () => applyTheme(document.documentElement.dataset.theme==="dark"?"light":"dark");
+applyTheme(localStorage.getItem("theme") || "light");
+
+// populate the per-role selects
+for (const id of ROLE_IDS) {
+  const sel = $("#"+id);
+  for (const m of IMAGE_MODELS) {
+    const o = document.createElement("option"); o.value=m; o.textContent=m; sel.appendChild(o);
+  }
+}
+function setRecommended(){
+  for (const id of ROLE_IDS) $("#"+id).value = "agnes";
+  $("#voice").value = "cartesia";
+  $("#captions").checked = true;
+}
+setRecommended();  // start on the recommended preset
+$("#rec-btn").onclick = setRecommended;
+
+$("#start-btn").onclick = async () => {
+  const btn = $("#start-btn"); btn.disabled = true; $("#status").textContent = "starting…";
+  try {
+    const res = await fetch("/api/runs", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({
+        topic: $("#topic").value.trim() || null,
+        char_model: $("#char_model").value,
+        concept_model: $("#concept_model").value,
+        voice: $("#voice").value,
+        captions: $("#captions").checked,
+        min_minutes: parseFloat($("#min_minutes").value) || 6,
+        max_minutes: parseFloat($("#max_minutes").value) || 9,
+      }),
+    });
+    if (!res.ok) {
+      const e = await res.json().catch(()=>({}));
+      $("#status").textContent = "error: " + (e.detail || res.status); btn.disabled = false; return;
+    }
+    const { run_id } = await res.json();
+    $("#status").textContent = "started " + run_id + " — redirecting…";
+    window.location = "/";  // the run appears at the top of the list, live
+  } catch (err) {
+    $("#status").textContent = "error: " + err; btn.disabled = false;
+  }
+};
+</script>
+</body>
+</html>

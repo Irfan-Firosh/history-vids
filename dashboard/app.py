@@ -11,16 +11,24 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
+import sys
 import threading
 from pathlib import Path
+from typing import Literal, get_args
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
+from pydantic import BaseModel
 
+from studio import new_run_id
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RUNS_DIR = REPO_ROOT / "result/axen/poc/runs"
+POC_SCRIPT = REPO_ROOT / "tools/studio_poc.py"
+PIPELINE_SCRIPT = REPO_ROOT / "tools/run_pipeline.py"  # topic → script → render (whole pipeline)
 INDEX_HTML_PATH = Path(__file__).parent / "index.html"
+NEW_RUN_HTML_PATH = Path(__file__).parent / "new_run.html"
 
 app = FastAPI(title="Pipeline Run Dashboard")
 
@@ -28,6 +36,32 @@ app = FastAPI(title="Pipeline Run Dashboard")
 # concurrent triggers would fight; we serialise them and surface a clear 409 instead.
 _active: dict[str, object] = {"run_id": None, "proc": None}
 _lock = threading.Lock()
+
+
+ImageModel = Literal["placeholder", "gemini", "agnes", "hf", "cloudflare"]
+_IMAGE_MODELS: tuple[str, ...] = get_args(ImageModel)  # valid provider names (re-run coercion)
+
+
+class RunRequest(BaseModel):
+    """Trigger payload — providers are constrained to the pipeline's known choices.
+
+    With ``topic`` set, the whole pipeline runs (topic → Exa+LLM script → render); without it, the
+    canned demo storyboard is rendered. ``images`` is the legacy single-provider shorthand (the main
+    page); the new run page instead sets per-role models (``char_model`` / ``concept_model``) — when
+    either is set it takes precedence over ``images``.
+    """
+
+    topic: str | None = None
+    images: ImageModel = "placeholder"
+    char_model: ImageModel | None = None
+    concept_model: ImageModel | None = None
+    voice: Literal["say", "cartesia"] = "say"
+    captions: bool = True
+    min_minutes: float = 6.0  # target duration band (topic runs only)
+    max_minutes: float = 9.0
+    # Human-in-the-loop: pause after images so the user can review/regenerate before assembly.
+    # On for topic runs by default (the demo has no real images worth reviewing).
+    review: bool = True
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -66,6 +100,12 @@ def index() -> str:
     # to index.html without a restart — a cached copy silently served stale UI (e.g. before the
     # fire-spot multi-frame view existed). The file is tiny, so a per-request read is free.
     return INDEX_HTML_PATH.read_text(encoding="utf-8")
+
+
+@app.get("/new", response_class=HTMLResponse)
+def new_run_page() -> str:
+    """Separate run-configuration page: per-role model pickers + a Recommended preset."""
+    return NEW_RUN_HTML_PATH.read_text(encoding="utf-8")
 
 
 @app.get("/api/runs")
@@ -122,3 +162,52 @@ def delete_run(run_id: str) -> dict[str, str]:
     run_dir = _run_dir(run_id)  # 404 + traversal-guarded
     shutil.rmtree(run_dir)
     return {"deleted": run_id}
+
+
+def _spawn_run(req: RunRequest) -> str:
+    """Spawn a pipeline (or canned-demo) run in the background under the single-run lock; return the
+    new run_id. Raises 409 if a run is already live. Shared by the trigger + re-run endpoints."""
+    with _lock:
+        proc = _active["proc"]
+        if proc is not None and proc.poll() is None:  # poll() is None ⇒ still running
+            raise HTTPException(
+                status_code=409, detail=f"run {_active['run_id']} still in progress"
+            )
+
+        run_id = new_run_id()
+        topic = (req.topic or "").strip()
+        script = PIPELINE_SCRIPT if topic else POC_SCRIPT  # whole pipeline vs canned demo
+        cmd = [sys.executable, str(script), "--run-id", run_id, "--voice", req.voice]
+        if topic:  # whole pipeline: pass topic + the target duration band
+            cmd[2:2] = [
+                "--topic", topic,
+                "--min-minutes", str(req.min_minutes), "--max-minutes", str(req.max_minutes),
+            ]
+            if req.review:  # pause after images for human review/approval (topic runs only)
+                cmd.append("--review")
+        # Per-role model selection (new run page) takes precedence over the legacy single --images.
+        if req.char_model or req.concept_model:
+            base = req.images
+            cmd += [
+                "--char-model", req.char_model or base,
+                "--concept-model", req.concept_model or base,
+            ]
+        else:
+            cmd += ["--images", req.images]
+        if not req.captions:
+            cmd.append("--no-captions")
+        # Logs land in the run's log.txt via the recorder; drop the subprocess' own stdio.
+        # start_new_session: detach into its own process group so a dashboard reload/restart/crash
+        # does NOT kill an in-flight render (a long topic run outlives the server).
+        proc = subprocess.Popen(
+            cmd, cwd=str(REPO_ROOT), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        _active.update(run_id=run_id, proc=proc, mode="pipeline")
+        return run_id
+
+
+@app.post("/api/runs", status_code=201)
+def trigger_run(req: RunRequest) -> dict[str, str]:
+    """Spawn a pipeline run in the background; return its run_id to poll. 409 if one is live."""
+    return {"run_id": _spawn_run(req)}
