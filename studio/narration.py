@@ -25,6 +25,23 @@ from itertools import accumulate
 
 from studio.captions import cue_timings, split_caption_cues
 
+#: Every on-screen frame holds at least this long (calm, Axen-style pacing). A beat long enough for
+#: two or more holds is split into that many DISTINCT freshly-generated frames.
+MIN_FRAME_HOLD = 8.0  # seconds
+
+
+MAX_FRAMES_PER_BEAT = 4  # hard cap so an intense/long beat can't balloon render cost
+
+
+def frames_for_span(
+    dur: float, min_hold: float = MIN_FRAME_HOLD, intense: bool = False,
+    cap: int = MAX_FRAMES_PER_BEAT,
+) -> int:
+    """How many frames a beat of length `dur` shows — each held ≥ `min_hold` (at least one). A
+    high-intensity beat gets ONE extra frame for more visual punch. Always capped at `cap`."""
+    base = max(1, int(dur // min_hold))
+    return min(cap, base + (1 if intense else 0))
+
 
 def build_transcript(narrations: Sequence[str]) -> str:
     """Join beats into one continuous transcript for a single natural-prosody TTS request."""
