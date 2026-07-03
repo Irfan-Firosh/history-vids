@@ -271,6 +271,16 @@ def test_storyboard_from_dict_requires_scenes():
         storyboard_from_dict({"title": "T", "scenes": []})
 
 
+def test_frame_prompt_makes_extra_frames_clearly_distinct():
+    from tools.studio_poc import _frame_prompt
+
+    base = "a caveman by a fire. flat cartoon style."
+    assert _frame_prompt(base, 0) == base  # frame 0 is the untouched base image
+    v1 = _frame_prompt(base, 1)
+    assert base in v1 and "variation 1" in v1
+    assert "DIFFERENT" in v1 and "near-duplicate" in v1  # forces a real cut, not a copy
+
+
 # ── script prompts (the moat — encode tone + factual constraints) ──────────────
 def test_script_system_prompt_encodes_tone_and_constraints():
     p = SCRIPT_SYSTEM_PROMPT.lower()
