@@ -29,6 +29,7 @@ from studio.script_prompt import (
     QUERY_SYSTEM_PROMPT,
     SCRIPT_SYSTEM_PROMPT,
     build_query_user_prompt,
+    build_script_user_prompt,
 )
 from studio.storyboard import storyboard_from_dict
 from studio.style import LOCKED_STYLE, styled_prompt
@@ -271,6 +272,16 @@ def test_storyboard_from_dict_requires_scenes():
         storyboard_from_dict({"title": "T", "scenes": []})
 
 
+def test_frame_prompt_makes_extra_frames_clearly_distinct():
+    from tools.studio_poc import _frame_prompt
+
+    base = "a caveman by a fire. flat cartoon style."
+    assert _frame_prompt(base, 0) == base  # frame 0 is the untouched base image
+    v1 = _frame_prompt(base, 1)
+    assert base in v1 and "variation 1" in v1
+    assert "DIFFERENT" in v1 and "near-duplicate" in v1  # forces a real cut, not a copy
+
+
 # ── script prompts (the moat — encode tone + factual constraints) ──────────────
 def test_script_system_prompt_encodes_tone_and_constraints():
     p = SCRIPT_SYSTEM_PROMPT.lower()
@@ -303,6 +314,14 @@ def test_build_query_user_prompt_includes_topic_and_count():
     assert "ancient sleep" in out and "5" in out
 
 
+def test_build_script_user_prompt_includes_topic_brief_and_target_band():
+    out = build_script_user_prompt(
+        "ancient sleep", "[1] a real study", 8, min_minutes=6, max_minutes=9
+    )
+    assert "ancient sleep" in out and "[1] a real study" in out
+    assert "8 beats" in out and "6-9 minute" in out  # beat count + target duration band
+
+
 # ── caption cues (short timed subtitles) ───────────────────────────────────────
 def test_split_caption_cues_keeps_chunks_short():
     text = "You stir before dawn, the cold air biting as the fire crackles for the first time."
@@ -333,6 +352,14 @@ def test_cue_timings_weights_longer_cues_with_more_time():
 def test_cue_timings_empty_or_zero():
     assert cue_timings([], 5.0) == []
     assert cue_timings(["x"], 0.0) == []
+
+
+# ── storyboard parsing ─────────────────────────────────────────────────────────
+def test_storyboard_from_dict_ignores_legacy_cutaways_key():
+    # Old saved scripts may still carry a "cutaways" key — it's simply ignored (back-compatible).
+    scene = {"narration": "n", "image_prompt": "p", "cutaways": ["a question mark"]}
+    sb = storyboard_from_dict({"title": "T", "scenes": [scene]})
+    assert sb.scenes[0].narration == "n" and not hasattr(sb.scenes[0], "cutaways")
 
 
 # ── HuggingFace helpers (pure) ─────────────────────────────────────────────────

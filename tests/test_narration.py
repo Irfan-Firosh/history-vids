@@ -6,6 +6,7 @@ from studio.narration import (
     align_beats,
     build_transcript,
     caption_timeline,
+    frames_for_span,
     image_timeline,
 )
 
@@ -47,11 +48,38 @@ def test_align_beats_handles_empty_and_degenerate():
     assert align_beats([1, 1], [], []) == [(0.0, 0.0), (0.0, 0.0)]  # no audio → no time
 
 
+# ── frames_for_span / image_timeline ─────────────────────────────────────────
+def test_frames_for_span_splits_by_min_hold():
+    assert frames_for_span(8.0) == 1  # exactly one 8s hold
+    assert frames_for_span(15.9) == 1  # not enough for a 2nd ≥8s hold
+    assert frames_for_span(16.0) == 2
+    assert frames_for_span(25.0) == 3
+    assert frames_for_span(2.0) == 1  # always at least one
+
+
+def test_frames_for_span_intense_adds_one_frame_capped():
+    assert frames_for_span(8.0, intense=True) == 2  # +1 for an intense beat
+    assert frames_for_span(16.0, intense=True) == 3  # 2 + 1
+    assert frames_for_span(8.0, intense=False) == 1  # unchanged when not intense
+    assert frames_for_span(100.0, intense=True) == 4  # hard cap 4/beat (bounds render cost)
+    assert frames_for_span(100.0) == 4  # cap applies even without intensity
+
+
 def test_image_timeline_never_repeats_a_frame_file():
     # No image filename may be scheduled in more than one segment (repeats look cheap).
     segs = image_timeline([(0.0, 32.0), (32.0, 48.0), (48.0, 56.0)], [4, 2, 1])
     names = [s[0] for s in segs]
     assert len(names) == len(set(names))  # all distinct
+
+
+def test_image_timeline_splits_long_beats_into_distinct_frames():
+    # 2 frames for beat 0, 1 for beat 1 → distinct files, no repeats, contiguous.
+    segs = image_timeline([(0.0, 16.0), (16.0, 24.0)], [2, 1])
+    names = [s[0] for s in segs]
+    assert names == ["img_0.png", "img_0_1.png", "img_1.png"]
+    # never the same file twice in a row
+    assert all(a != b for a, b in zip(names, names[1:], strict=False))
+    assert segs[0] == ("img_0.png", 0.0, 8.0) and segs[1] == ("img_0_1.png", 8.0, 16.0)
 
 
 def test_image_timeline_covers_each_beat_contiguously():

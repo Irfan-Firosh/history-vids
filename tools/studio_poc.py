@@ -632,3 +632,34 @@ def build_providers(mode: str) -> ImageProviders:
     if mode == "hf":
         return providers_from_roles("hf", "hf")
     return providers_from_roles("placeholder", "placeholder")
+
+
+def _generate_frame(provider, styled, target, refs, fallback, rec, i, k):
+    """Generate one frame; if the primary provider fails (e.g. a Gemini safety refusal on a prompt),
+    fall back to a secondary provider so one bad frame never kills a long run."""
+    try:
+        provider.generate(styled, target, refs)
+    except Exception as err:
+        if fallback is None:
+            raise
+        rec.log(f"scene {i} frame {k}: {provider.name} failed ({err}); falling back to {fallback.name}")
+        fallback.generate(styled, target, refs)
+
+
+def _frame_name(i: int, k: int) -> str:
+    """The on-disk name for beat ``i``'s ``k``-th frame (``img_i.png`` / ``img_i_k.png``)."""
+    return f"img_{i}.png" if k == 0 else f"img_{i}_{k}.png"
+
+
+def _frame_prompt(styled: str, k: int) -> str:
+    """The prompt for beat frame ``k``. ``k == 0`` is the base image; each extra frame (a "fire
+    spot" / intense beat shows two) must be a CLEARLY different shot of the SAME scene so the
+    on-screen switch reads as a real cut, not a near-duplicate — a different camera distance/angle
+    and a different moment, pose and action, same characters and style."""
+    if k == 0:
+        return styled
+    return (
+        f"{styled} This is a DIFFERENT shot of the SAME scene, characters and art style — change "
+        f"the camera distance and angle and show a distinctly different moment, pose and action "
+        f"from the other frame (variation {k}): a clearly different composition, NOT a near-duplicate."
+    )
