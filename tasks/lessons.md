@@ -43,6 +43,16 @@ model appended a second object / commentary after the storyboard, so the slice s
 first `{` (parses exactly one complete value, ignores anything trailing) instead of a greedy
 `{`…`}` slice. Add a `not isinstance(obj, dict)` guard. Local models routinely emit extra prose/objects.
 
+## 2026-07-03 — On-screen fact text: keep images text-free; don't PIL-overlay it either
+**Correction:** I first built key-fact emphasis (numbers/dates/names) as a **crisp PIL overlay** composited
+by FFmpeg (the diffusion model garbles digits, so overlay = legible). The user then rejected the PIL look
+outright: "i dont like the PIL renders … if the accuracy for text of the diffusion model are that bad its
+better not to do it." So BOTH channels are out — no PIL stat-cards, no diffusion-drawn text.
+**Rule:** Keep every generated image **text-free** (`NO_TEXT` guardrail); let the **narration + subtitles**
+carry the facts. Only purely *symbolic, wordless* emphasis (question mark, hourglass) may be drawn in-scene.
+Don't add a text-overlay layer without the user's taste sign-off — a technically-correct legibility fix can
+still be the wrong aesthetic. Show a sample and confirm the *look* before building the pipeline around it.
+
 ## 2026-07-03 — Resume must reuse saved narration + spans, not just skip frames
 **Pattern:** Frame-level resume (`if resume and target.is_file(): continue`) already reused images, but
 `render_storyboard` still re-ran `build_narration` every resume — a fresh Cartesia call (cost) whose new
