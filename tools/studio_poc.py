@@ -33,6 +33,7 @@ sys.path.insert(0, str(_ROOT))
 
 
 from studio import (  # noqa: E402
+    RunRecorder,
     agnes,
     cloudflare,
     gemini,
@@ -576,6 +577,27 @@ def load_channel_refs() -> list[Path]:
     return [p for p in (REFS_DIR / "character.png", REFS_DIR / "expressions.png") if p.exists()]
 
 
+BEAT_SPANS_NAME = "beat_spans.json"
+
+
+def _save_beat_spans(out_dir: Path, spans: list[tuple[float, float]]) -> None:
+    """Persist the per-beat (start,end) spans so a resume reuses the exact timings (no re-synth)."""
+    (out_dir / BEAT_SPANS_NAME).write_text(
+        json.dumps([[round(s, 3), round(e, 3)] for s, e in spans])
+    )
+
+
+def _load_beat_spans(out_dir: Path) -> list[tuple[float, float]] | None:
+    """The saved beat spans for a run, or None if absent/unreadable (fall back to re-synthesis)."""
+    path = out_dir / BEAT_SPANS_NAME
+    if not path.is_file():
+        return None
+    try:
+        return [(float(s), float(e)) for s, e in json.loads(path.read_text())]
+    except (ValueError, TypeError):
+        return None
+
+
 #: Providers that condition on a reference image to keep the recurring character on-model
 #: (Gemini reference-conditioning, Cloudflare FLUX.2 input images, Agnes image-to-image).
 REF_CAPABLE = frozenset({"gemini", "cloudflare", "agnes"})
@@ -663,3 +685,25 @@ def _frame_prompt(styled: str, k: int) -> str:
         f"the camera distance and angle and show a distinctly different moment, pose and action "
         f"from the other frame (variation {k}): a clearly different composition, NOT a near-duplicate."
     )
+
+
+def _record_resume_progress(rec: RunRecorder, frames_per_beat: list[int]) -> None:
+    """On resume, count frames already on disk and record where generation will pick up — so the
+    manifest/dashboard show truthful progress instead of looking like a fresh start."""
+    total = sum(frames_per_beat)
+    done = 0
+    first_missing: tuple[int, int] | None = None
+    for i, nfb in enumerate(frames_per_beat):
+        for k in range(nfb):
+            if (rec.dir / _frame_name(i, k)).is_file():
+                done += 1
+            elif first_missing is None:
+                first_missing = (i, k)
+    if first_missing is None:
+        note = f"resume: all {total} frames already on disk — only re-assembling the video"
+    else:
+        si, sk = first_missing
+        note = (f"resume: {done}/{total} frames already on disk — "
+                f"continuing at scene {si + 1} (frame {sk + 1})")
+    rec.resumed(note)
+    print(f"  ↻ {note}")
