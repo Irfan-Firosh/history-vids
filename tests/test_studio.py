@@ -336,6 +336,23 @@ def test_storyboard_from_dict_requires_scenes():
         storyboard_from_dict({"title": "T", "scenes": []})
 
 
+def test_scene_started_records_callout_and_intense(tmp_path):
+    # The manifest labels "callout frames" — emphasis + intense land in run.json for the dashboard.
+    import json
+
+    from studio.run_log import RunRecorder
+
+    rec = RunRecorder.create(
+        tmp_path, title="t", images_provider="agnes", voice_provider="cartesia", scene_count=1,
+    )
+    rec.scene_started(
+        0, "concept", "a route map", emphasis="18,000 miles", intense=True, frame_count=2
+    )
+    s0 = json.loads((rec.dir / "run.json").read_text())["scenes"][0]
+    assert s0["emphasis"] == "18,000 miles" and s0["intense"] is True
+    assert s0["frame_count"] == 2  # fire spot → dashboard shows both frames
+
+
 def test_frame_prompt_makes_extra_frames_clearly_distinct():
     from tools.studio_poc import _frame_prompt
 
@@ -344,6 +361,23 @@ def test_frame_prompt_makes_extra_frames_clearly_distinct():
     v1 = _frame_prompt(base, 1)
     assert base in v1 and "variation 1" in v1
     assert "DIFFERENT" in v1 and "near-duplicate" in v1  # forces a real cut, not a copy
+
+
+def test_set_callouts_records_the_flashed_plan(tmp_path):
+    # The dashboard shows WHICH callouts render, on which scene's frame, and when.
+    import json
+
+    from studio.run_log import RunRecorder
+
+    rec = RunRecorder.create(
+        tmp_path, title="t", images_provider="agnes", voice_provider="cartesia", scene_count=3,
+    )
+    rec.set_callouts([("Tsushima", 1, 12.3456), ("1905", 5, 62.0)])
+    callouts = json.loads((rec.dir / "run.json").read_text())["callouts"]
+    assert callouts == [
+        {"text": "Tsushima", "scene_index": 1, "start_sec": 12.346},
+        {"text": "1905", "scene_index": 5, "start_sec": 62.0},
+    ]
 
 
 def test_run_recorder_load_preserves_existing_manifest(tmp_path):
@@ -358,6 +392,16 @@ def test_run_recorder_load_preserves_existing_manifest(tmp_path):
     reloaded = RunRecorder.load(tmp_path, rec.run_id)
     assert reloaded.manifest.status == "pending_approval"
     assert [s.image_prompt for s in reloaded.manifest.scenes] == ["a lone figure"]
+
+
+def test_storyboard_from_dict_reads_emphasis_and_intense_with_defaults():
+    scenes = [
+        {"narration": "n", "image_prompt": "p", "emphasis": " 1905 ", "intense": True},
+        {"narration": "n2", "image_prompt": "p2"},  # both absent → "" / False
+    ]
+    sb = storyboard_from_dict({"title": "T", "scenes": scenes})
+    assert sb.scenes[0].emphasis == "1905" and sb.scenes[0].intense is True
+    assert sb.scenes[1].emphasis == "" and sb.scenes[1].intense is False
 
 
 # ── script prompts (the moat — encode tone + factual constraints) ──────────────
