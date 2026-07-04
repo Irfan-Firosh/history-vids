@@ -72,3 +72,15 @@ brightness − roughness, skip the subtitle band + dead-center) and composite bl
 white halo there; card fallback only when no zone is clean. Show the user a rendered sample and get a
 taste sign-off before building — this callout has now flipped 3× (build → remove → rebuild restyled).
 
+## 2026-07-03 — "Main character energy" on Agnes must come from a TEXT-described protagonist
+**(SUPERSEDED 2026-07-04: the user disliked the forced recurring protagonist — `CHARACTER_IDENTITY`
+and the scarf were REMOVED; characters are now generic + consistent only. Keep the underlying insight
+that ref images don't reach Agnes t2i, but do NOT reintroduce a named/scarf lead.)**
+**Pattern:** The character prompt said "use the SAME character shown in the reference image," but Agnes
+text-to-image never receives the reference PNG (refs only reach Gemini) — so every character beat
+re-invented a generic stick figure, giving the video no consistent lead.
+**Rule:** Pin one distinctive recurring protagonist in the prompt TEXT (`CHARACTER_IDENTITY` in
+`studio/style.py`: a signature trait like a muted-teal scarf), used on every character/wide shot, so a
+ref-less t2i model still draws the same character. Reserve character/wide for the protagonist's real
+moments; concept/map stay people-free to kill filler stickmen.
+
