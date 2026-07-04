@@ -26,8 +26,10 @@ from studio.llm import (
 )
 from studio.research import ResearchSource, format_research_brief
 from studio.script_prompt import (
+    CALLOUT_ANALYSIS_SYSTEM_PROMPT,
     QUERY_SYSTEM_PROMPT,
     SCRIPT_SYSTEM_PROMPT,
+    build_callout_analysis_user_prompt,
     build_query_user_prompt,
     build_script_user_prompt,
 )
@@ -353,6 +355,31 @@ def test_scene_started_records_callout_and_intense(tmp_path):
     assert s0["frame_count"] == 2  # fire spot → dashboard shows both frames
 
 
+def test_boost_intense_beats_adds_roughly_1_5x_more_fire_spots():
+    from tools.make_script import _boost_intense_beats
+
+    # 20 beats, 4 flagged by the analysis pass → target round(4 * 1.5) = 6 fire spots.
+    scenes = [{"narration": "x" * (i + 1), "intense": i in (0, 1, 2, 3)} for i in range(20)]
+    _boost_intense_beats(scenes)
+    intense = [i for i, s in enumerate(scenes) if s["intense"]]
+    assert len(intense) == 6  # 1.5x the original 4
+    assert {0, 1, 2, 3} <= set(intense)  # never un-flags the LLM's picks
+    # the two promoted beats are the longest-narration not-yet-flagged ones (19 and 18).
+    assert {18, 19} <= set(intense)
+
+
+def test_boost_intense_beats_is_capped_and_noop_when_none_flagged():
+    from tools.make_script import _boost_intense_beats
+
+    none = [{"narration": "abc", "intense": False} for _ in range(10)]
+    _boost_intense_beats(none)
+    assert not any(s["intense"] for s in none)  # 0 * 1.5 = 0 → stays empty
+
+    many = [{"narration": "abc", "intense": i < 8} for i in range(10)]
+    _boost_intense_beats(many)  # round(8*1.5)=12 capped at 50% of 10 = 5 → already 8, so no change
+    assert sum(s["intense"] for s in many) == 8
+
+
 def test_frame_prompt_makes_extra_frames_clearly_distinct():
     from tools.studio_poc import _frame_prompt
 
@@ -434,6 +461,58 @@ def test_query_system_prompt_seeks_evidence_and_disagreement():
 def test_build_query_user_prompt_includes_topic_and_count():
     out = build_query_user_prompt("ancient sleep", 5)
     assert "ancient sleep" in out and "5" in out
+
+
+def test_callout_analysis_prompt_encodes_selection_criteria():
+    p = CALLOUT_ANALYSIS_SYSTEM_PROMPT.lower()
+    assert "proper names" in p and "numbers" in p  # prefer names + hard numbers
+    assert "reject" in p  # reject vague/common words
+    assert "appear in that beat's narration" in p and "never invent" in p  # grounded, no invention
+    assert "intense" in p  # also flags dramatic beats
+    schema = CALLOUT_ANALYSIS_SYSTEM_PROMPT
+    assert '"callouts"' in schema and '"intense"' in schema  # returns both lists
+
+
+def test_build_callout_analysis_user_prompt_lists_indexed_beats():
+    out = build_callout_analysis_user_prompt(
+        [{"beat": 0, "narration": "The admiral Hugh Ogden gave the order."},
+         {"beat": 1, "narration": "Nothing much happened."}]
+    )
+    assert "[0] The admiral Hugh Ogden" in out and "[1] Nothing much" in out
+
+
+def test_apply_callout_analysis_maps_callouts_and_intense(monkeypatch):
+    from tools.make_script import LLMScriptProvider
+
+    prov = LLMScriptProvider(research=None)
+    monkeypatch.setattr(
+        prov, "_chat",
+        lambda system, user, temp=None:
+        '{"callouts": [{"beat": 1, "text": " Hugh Ogden "}, {"beat": 9, "text": "x"}], '
+        '"intense": [0, 2]}',
+    )
+    data = {"scenes": [{"narration": "a"}, {"narration": "b"}, {"narration": "c"}]}
+    prov._apply_callout_analysis(data)
+    scenes = data["scenes"]
+    assert scenes[1]["emphasis"] == "Hugh Ogden"  # mapped + trimmed
+    assert scenes[0]["emphasis"] == "" and scenes[2]["emphasis"] == ""  # other beats stay clear
+    assert scenes[0]["intense"] is True and scenes[2]["intense"] is True
+    assert data["scenes"][1]["intense"] is False  # out-of-range beat 9 ignored, no crash
+
+
+def test_apply_callout_analysis_degrades_gracefully_on_llm_failure(monkeypatch):
+    from studio.llm import LLMError
+    from tools.make_script import LLMScriptProvider
+
+    prov = LLMScriptProvider(research=None)
+
+    def boom(system, user, temp=None):
+        raise LLMError("endpoint down")
+
+    monkeypatch.setattr(prov, "_chat", boom)
+    data = {"scenes": [{"narration": "a"}, {"narration": "b"}]}
+    prov._apply_callout_analysis(data)  # must not raise
+    assert all(s["emphasis"] == "" and s["intense"] is False for s in data["scenes"])
 
 
 def test_build_script_user_prompt_includes_topic_brief_and_target_band():
