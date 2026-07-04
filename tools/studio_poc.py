@@ -38,6 +38,7 @@ from studio import (  # noqa: E402
     cloudflare,
     gemini,
     huggingface,
+    scene_filter,
 )
 from studio.style import LOCKED_STYLE, PALETTE  # noqa: E402
 
@@ -734,6 +735,59 @@ def make_emphasis_png(text: str, out: Path, base_image: Path | None = None) -> N
                stroke_width=4, stroke_fill=(255, 255, 255, 235))
         top += line_h
     im.save(out)
+
+
+def render_video(
+    segments: list[tuple[Path, float, float]],
+    wav: Path,
+    cues: list[tuple[str, float, float]],
+    out: Path,
+    overlays: list[tuple[str, float, float, Path]] | None = None,
+) -> None:
+    """Assemble the WHOLE video in one pass: `segments` are (image, start, end) global spans, hard-cut
+    in order across one continuous narration `wav`, with timed caption `cues` (text, start, end)
+    overlaid at the bottom. `overlays` are optional key-fact callouts (text, start, end, base_image)
+    placed on the frame's whitespace via `make_emphasis_png`. Shared by the main render
+    (`render_storyboard`) and the re-edit (`reassemble`)."""
+    overlays = overlays or []
+    vf = scene_filter("static", W, H, 1.0, FPS)  # static → scale/crop only; duration irrelevant
+    n = len(segments)
+    inputs: list[str] = []
+    for path, start, end in segments:
+        inputs += ["-loop", "1", "-t", f"{end - start:.3f}", "-i", str(path)]
+    inputs += ["-i", str(wav)]
+    audio_idx = n
+    # Both layers use the same timed full-frame PNG-overlay mechanism → build every overlay PNG once.
+    overlay_pngs: list[tuple[Path, float, float]] = []  # (png, start, end) in composite order
+    for k, (text, start, end) in enumerate(cues):
+        cap = out.with_name(f"{out.stem}_cap_{k}.png")
+        make_caption_png(text, cap)
+        overlay_pngs.append((cap, start, end))
+    for k, (text, start, end, base) in enumerate(overlays):
+        ep = out.with_name(f"{out.stem}_emph_{k}.png")
+        make_emphasis_png(text, ep, base)
+        overlay_pngs.append((ep, start, end))
+    for png, _, _ in overlay_pngs:
+        inputs += ["-i", str(png)]
+
+    chain = ";".join(f"[{j}:v]{vf}[s{j}]" for j in range(n))
+    chain += ";" + "".join(f"[s{j}]" for j in range(n)) + f"concat=n={n}:v=1:a=0[base]"
+    prev = "base"
+    for k, (_, start, end) in enumerate(overlay_pngs):
+        chain += (
+            f";[{prev}][{audio_idx + 1 + k}:v]"
+            f"overlay=0:0:enable='between(t,{start},{end})'[v{k}]"
+        )
+        prev = f"v{k}"
+
+    _run([
+        "ffmpeg", "-y", *inputs, "-filter_complex", chain,
+        "-map", f"[{prev}]", "-map", f"{audio_idx}:a",
+        "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-r", str(FPS),
+        "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-shortest", str(out),
+    ])
+    for png, _, _ in overlay_pngs:  # tidy the temp overlay PNGs (captions + callouts)
+        Path(png).unlink(missing_ok=True)
 
 
 def concat_audio(wavs: list[Path], out: Path) -> None:
