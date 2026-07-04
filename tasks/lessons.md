@@ -35,3 +35,11 @@ abandoned/legacy engine. Don't route progress back through legacy code (Twitch, 
 solve it within the active direction or name the real blocker. See [[titan-project-goal]].
 (Update 2026-06-27: niche later settled on faceless AI-history; old Twitch/RankZilla code deleted, tagged.)
 
+## 2026-07-03 — Parse ONE JSON value from LLM output; ignore trailing junk
+**Correction:** A run failed at script-gen with `json.decoder.JSONDecodeError: Extra data (char 15415)`.
+`parse_json_block` sliced `first "{"` … `last "}"` then `json.loads`-ed the whole slice — but the local
+model appended a second object / commentary after the storyboard, so the slice spanned valid JSON + junk.
+**Rule:** When extracting a JSON object from LLM text, use `json.JSONDecoder().raw_decode()` from the
+first `{` (parses exactly one complete value, ignores anything trailing) instead of a greedy
+`{`…`}` slice. Add a `not isinstance(obj, dict)` guard. Local models routinely emit extra prose/objects.
+
