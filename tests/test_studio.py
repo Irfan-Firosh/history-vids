@@ -431,6 +431,25 @@ def test_storyboard_from_dict_reads_emphasis_and_intense_with_defaults():
     assert sb.scenes[1].emphasis == "" and sb.scenes[1].intense is False
 
 
+def test_storyboard_from_dict_skips_partial_beats_but_keeps_valid_ones():
+    # The local model sometimes drops a required key on a beat — skip it, keep the rest.
+    scenes = [
+        {"narration": "good", "image_prompt": "a cave"},
+        {"narration": "no image here"},          # missing image_prompt → dropped
+        {"image_prompt": "no narration here"},    # missing narration → dropped
+        "not even a dict",                         # non-dict entry → dropped
+        {"narration": "also good", "image_prompt": "a hill"},
+    ]
+    sb = storyboard_from_dict({"title": "T", "scenes": scenes})
+    assert [s.narration for s in sb.scenes] == ["good", "also good"]
+
+
+def test_storyboard_from_dict_raises_when_no_beat_is_usable():
+    # Every beat is partial → nothing renderable → still fail loudly (don't return an empty video).
+    with pytest.raises(ValueError):
+        storyboard_from_dict({"title": "T", "scenes": [{"narration": "x"}, {"image_prompt": "y"}]})
+
+
 # ── script prompts (the moat — encode tone + factual constraints) ──────────────
 def test_script_system_prompt_encodes_tone_and_constraints():
     p = SCRIPT_SYSTEM_PROMPT.lower()
