@@ -135,3 +135,20 @@ def test_delete_missing_run_is_404(client):
 
 def test_delete_traversal_blocked(client):
     assert client.request("DELETE", "/api/runs/..%2f..%2fetc").status_code == 404
+
+
+# ── resume (pick up a stopped/failed run, reusing frames on disk) ──────────────
+def _mark_failed_with_storyboard(run_dir, images_provider="gemini/agnes"):
+    m = json.loads((run_dir / "run.json").read_text())
+    m["status"] = "failed"
+    m["images_provider"] = images_provider
+    m["voice_provider"] = "cartesia"
+    (run_dir / "run.json").write_text(json.dumps(m))
+    (run_dir / "storyboard.json").write_text('{"title": "t", "scenes": []}')
+
+
+def test_resume_rejected_without_storyboard(client):
+    m = json.loads((dash.RUNS_DIR / "20260101-000000" / "run.json").read_text())
+    m["status"] = "failed"
+    (dash.RUNS_DIR / "20260101-000000" / "run.json").write_text(json.dumps(m))
+    assert client.post("/api/runs/20260101-000000/resume", json={}).status_code == 400
