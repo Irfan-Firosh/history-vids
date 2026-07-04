@@ -32,6 +32,11 @@ MIN_FRAME_HOLD = 8.0  # seconds
 
 MAX_FRAMES_PER_BEAT = 4  # hard cap so an intense/long beat can't balloon render cost
 
+#: Callouts must feel rare — the user wants only ~2-3 flashed facts per 90s. We enforce a minimum
+#: spacing between consecutive callouts at render time (a hard guardrail regardless of how many the
+#: analysis pass proposes): ~35s apart ⇒ at most ~2-3 in any 90-second window.
+CALLOUT_MIN_GAP_SEC = 35.0
+
 
 def frames_for_span(
     dur: float, min_hold: float = MIN_FRAME_HOLD, intense: bool = False,
@@ -118,6 +123,48 @@ def caption_timeline(
         cues = split_caption_cues(text, max_words=max_words, max_chars=max_chars)
         for (cue_start, cue_end), cue in zip(cue_timings(cues, end - start), cues, strict=False):
             out.append((cue, round(start + cue_start, 3), round(start + cue_end, 3)))
+    return out
+
+
+def emphasis_timeline(
+    beat_spans: Sequence[tuple[float, float]],
+    emphases: Sequence[str],
+    narrations: Sequence[str] = (),
+    min_gap_sec: float = CALLOUT_MIN_GAP_SEC,
+    lead_sec: float = 0.3,
+    min_hold_sec: float = 2.0,
+) -> list[tuple[str, int, float, float]]:
+    """Global list of (fact_text, beat_index, start, end) key-fact callouts — one per beat whose
+    ``emphasis`` is non-empty — timed so each callout appears WHEN its phrase is spoken.
+
+    Cartesia gives per-beat spans but not per-word times, so (like ``align_beats`` and the caption
+    timing) we ESTIMATE the phrase's spoken moment from its character offset within the beat's
+    narration, then pull it ``lead_sec`` earlier so it lands **on or before** the word. ``start`` is
+    clamped so the callout stays up at least ``min_hold_sec`` (readability) and never precedes its
+    beat; it holds until the beat ends. A minimum spacing of ``min_gap_sec`` between consecutive
+    callouts is enforced greedily so flashed facts stay rare (~2-3 per 90s) even when the analysis
+    pass over-proposes. ``beat_index`` lets the renderer find the beat's image (for placement).
+    """
+    out: list[tuple[str, int, float, float]] = []
+    last_kept = float("-inf")
+    for i, ((bstart, bend), text) in enumerate(zip(beat_spans, emphases, strict=False)):
+        fact = (text or "").strip()
+        if not fact:
+            continue
+        narr = narrations[i] if i < len(narrations) else ""
+        dur = bend - bstart
+        # Estimate when the phrase is spoken: its character position in the beat, scaled to the
+        # beat duration (speech ≈ uniform per beat), minus a small lead so it shows before the word.
+        pos = narr.lower().find(fact.lower()) if narr else -1
+        if pos >= 0 and dur > 0:
+            start = bstart + (pos / len(narr)) * dur - lead_sec
+        else:  # phrase not located → show from the start of the beat (still "before" the word)
+            start = bstart
+        hold = min(min_hold_sec, dur)  # keep it on screen long enough (don't invert a short beat)
+        start = max(bstart, min(start, bend - hold))
+        if start - last_kept >= min_gap_sec:
+            out.append((fact, i, round(start, 3), round(bend, 3)))
+            last_kept = start
     return out
 
 

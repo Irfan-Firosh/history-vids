@@ -38,6 +38,7 @@ from studio import (  # noqa: E402
     cloudflare,
     gemini,
     huggingface,
+    scene_filter,
 )
 from studio.style import LOCKED_STYLE, PALETTE  # noqa: E402
 
@@ -57,6 +58,20 @@ _FONT_CANDIDATES = [
 
 def _fontfile() -> str | None:
     return next((f for f in _FONT_CANDIDATES if os.path.exists(f)), None)
+
+
+# Key-fact callouts use a casual handwritten face (Schoolbell, OFL — committed to assets/fonts/);
+# fall back to an installed hand-drawn font, then anything, so a missing file never breaks a run.
+_CALLOUT_FONT_CANDIDATES = [
+    str(_ROOT / "assets/fonts/Schoolbell.ttf"),
+    "/System/Library/Fonts/Supplemental/Chalkduster.ttf",
+    "/System/Library/Fonts/Supplemental/Bradley Hand Bold.ttf",
+    "/System/Library/Fonts/Supplemental/Comic Sans MS.ttf",
+]
+
+
+def _callout_fontfile() -> str | None:
+    return next((f for f in _CALLOUT_FONT_CANDIDATES if os.path.exists(f)), None) or _fontfile()
 
 
 def _run(cmd: list[str]) -> None:
@@ -560,6 +575,219 @@ def make_caption_png(text: str, out: Path) -> None:
         d.text(((W - w) / 2, y), ln, font=font, fill=(255, 255, 255, 255))
         y += line_h
     im.save(out)
+
+
+#: The callout box, as fractions of the frame: a wide, short band the text word-wraps inside.
+_CALLOUT_BOX_WF, _CALLOUT_BOX_HF = 0.42, 0.16
+#: Search bounds (frame fractions): stay out of the bottom subtitle band and off the very edges.
+_CALLOUT_TOP_MARGIN, _CALLOUT_SIDE_MARGIN, _CALLOUT_SUBTITLE_TOP = 0.05, 0.03, 0.74
+#: Above this local roughness (grayscale std, 0-255) even the flattest region is too busy for
+#: text — the caller then falls back to a sensible default spot (still text-only, no card).
+_CALLOUT_MAX_STD = 34.0
+#: Cap the scan resolution: big enough to preserve real detail/noise (so busy frames score busy),
+#: small enough to stay fast. Frames are only downscaled if larger than this on the long side.
+_CALLOUT_SCAN_MAX_DIM = 1280
+
+
+def _pick_callout_zone(base_image: Path) -> tuple[int, int, int, int] | None:
+    """Find the emptiest (flattest) region of the frame to drop the callout onto — returns an
+    (x, y, w, h) box in OUTPUT-frame pixels, or None when even the best region is too busy (the
+    caller then uses a default spot).
+
+    Rather than a handful of fixed candidate zones, this slides the callout box across the whole
+    usable area (above the subtitle band) and scores every position by local *flatness* using an
+    integral image (summed-area table) so each window's mean/variance is O(1). Flat, uncluttered
+    areas — an empty sky, a plain wall — win; busy/inky areas lose. A mild bonus prefers lighter
+    regions and the sides/top (the subject usually sits low-center), but flatness dominates so the
+    text lands on genuine whitespace, wherever it actually is in this particular image."""
+    import numpy as np
+    from PIL import Image
+
+    try:
+        im = Image.open(base_image).convert("L")
+    except (OSError, ValueError):
+        return None
+    if max(im.size) > _CALLOUT_SCAN_MAX_DIM:  # bound cost; only downscale oversized frames
+        im.thumbnail((_CALLOUT_SCAN_MAX_DIM, _CALLOUT_SCAN_MAX_DIM))
+    arr = np.asarray(im, dtype=np.float64)
+    sh, sw = arr.shape
+    wpx, hpx = max(1, int(_CALLOUT_BOX_WF * sw)), max(1, int(_CALLOUT_BOX_HF * sh))
+
+    # Summed-area tables of values and squared values → O(1) window sum for mean + variance.
+    ii = np.zeros((sh + 1, sw + 1))
+    ii2 = np.zeros((sh + 1, sw + 1))
+    ii[1:, 1:] = arr.cumsum(0).cumsum(1)
+    ii2[1:, 1:] = (arr * arr).cumsum(0).cumsum(1)
+
+    def _win(table, y0, x0):  # sum over [y0:y0+hpx, x0:x0+wpx]
+        return (table[y0 + hpx, x0 + wpx] - table[y0, x0 + wpx]
+                - table[y0 + hpx, x0] + table[y0, x0])
+
+    y_lo, x_lo = int(_CALLOUT_TOP_MARGIN * sh), int(_CALLOUT_SIDE_MARGIN * sw)
+    y_hi = int(_CALLOUT_SUBTITLE_TOP * sh) - hpx
+    x_hi = sw - wpx - int(_CALLOUT_SIDE_MARGIN * sw)
+    n = wpx * hpx
+    ystep, xstep = max(1, hpx // 3), max(1, wpx // 4)
+
+    best, best_score, best_std = None, float("-inf"), 0.0
+    for y0 in range(y_lo, max(y_lo, y_hi) + 1, ystep):
+        for x0 in range(x_lo, max(x_lo, x_hi) + 1, xstep):
+            mean = _win(ii, y0, x0) / n
+            std = (max(0.0, _win(ii2, y0, x0) / n - mean * mean)) ** 0.5
+            cx, cy = (x0 + wpx / 2) / sw, (y0 + hpx / 2) / sh
+            # Flatness (−std) dominates; small nudges toward lighter, off-center, upper regions.
+            score = -std + (mean / 255) * 8 + abs(cx - 0.5) * 12 + (1 - cy) * 6
+            # Avoid the horizontal center (middle 35%) where character head/body stands
+            if 0.325 <= cx <= 0.675:
+                score -= 100.0
+            if score > best_score:
+                best_score, best, best_std = score, (x0 / sw, y0 / sh), std
+    if best is None:
+        return None
+    fx, fy = best
+    is_busy = bool(best_std > _CALLOUT_MAX_STD)
+    return (int(fx * W), int(fy * H), int(_CALLOUT_BOX_WF * W), int(_CALLOUT_BOX_HF * H), is_busy)
+
+
+def _fit_callout_text(draw, text: str, font_path: str | None, max_w: int, max_h: int):
+    """Largest font size (Schoolbell) at which `text` word-wraps inside (max_w, max_h). Returns
+    (lines, font, line_height)."""
+    from PIL import ImageFont
+
+    for size in range(112, 42, -6):
+        font = ImageFont.truetype(font_path, size) if font_path else ImageFont.load_default()
+        words, lines, cur = text.split(), [], ""
+        for wd in words:
+            trial = f"{cur} {wd}".strip()
+            if draw.textlength(trial, font=font) <= max_w or not cur:
+                cur = trial
+            else:
+                lines.append(cur)
+                cur = wd
+        if cur:
+            lines.append(cur)
+        line_h = int(size * 1.25)
+        widest = max((draw.textlength(ln, font=font) for ln in lines), default=0)
+        if (widest <= max_w and line_h * len(lines) <= max_h) or font_path is None:
+            return lines, font, line_h
+    font = ImageFont.truetype(font_path, 44) if font_path else ImageFont.load_default()
+    return [text], font, 54
+
+
+def make_emphasis_png(text: str, out: Path, base_image: Path | None = None) -> None:
+    """Render a full-frame transparent key-fact callout.
+
+    If the selected zone is too busy, a hand-drawn paper card is drawn behind the text to guarantee
+    legibility. Safe off-center fallback is used if no image is available.
+    """
+    from PIL import Image, ImageDraw
+
+    text = _clean_caption(text).strip()
+    im = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    ff = _callout_fontfile()
+
+    zone_res = _pick_callout_zone(base_image) if base_image else None
+    if zone_res is None:
+        # Default off-center fallback (top-left) if no image or scan failed
+        zw, zh = int(W * 0.42), int(H * 0.16)
+        zx, zy = int(W * 0.05), int(H * 0.07)
+        is_busy = False
+    else:
+        zx, zy, zw, zh, is_busy = zone_res
+
+    # Draw a wobbly hand-drawn paper card background if the zone is busy
+    if is_busy:
+        import random
+        pad = 12
+        rx0, ry0 = zx + pad, zy + pad
+        rx1, ry1 = zx + zw - pad, zy + zh - pad
+        
+        # Subdivide rectangle edges to make them wobbly
+        points = []
+        for x in range(rx0, rx1 + 1, 40):
+            points.append((x, ry0 + random.randint(-4, 4)))
+        for y in range(ry0 + 40, ry1 + 1, 40):
+            points.append((rx1 + random.randint(-4, 4), y))
+        for x in range(rx1 - 40, rx0 - 1, -40):
+            points.append((x, ry1 + random.randint(-4, 4)))
+        for y in range(ry1 - 40, ry0 - 1, -40):
+            points.append((rx0 + random.randint(-4, 4), y))
+            
+        # Draw the filled paper card (translucent off-white)
+        d.polygon(points, fill=(244, 240, 232, 230))
+        
+        # Draw a sketchy double outline
+        for _ in range(2):
+            outline_points = []
+            for pt in points:
+                outline_points.append((pt[0] + random.randint(-1, 1), pt[1] + random.randint(-1, 1)))
+            d.polygon(outline_points, outline=(40, 40, 40, 225), width=2)
+
+    lines, font, line_h = _fit_callout_text(d, text, ff, zw - 48, zh - 24)
+    block_h = line_h * len(lines)
+    top = zy + (zh - block_h) // 2
+    cx = zx + zw // 2
+
+    for ln in lines:
+        w = d.textlength(ln, font=font)
+        d.text((cx - w / 2, top), ln, font=font, fill=(20, 20, 20, 255),
+               stroke_width=4, stroke_fill=(255, 255, 255, 235))
+        top += line_h
+    im.save(out)
+
+
+def render_video(
+    segments: list[tuple[Path, float, float]],
+    wav: Path,
+    cues: list[tuple[str, float, float]],
+    out: Path,
+    overlays: list[tuple[str, float, float, Path]] | None = None,
+) -> None:
+    """Assemble the WHOLE video in one pass: `segments` are (image, start, end) global spans, hard-cut
+    in order across one continuous narration `wav`, with timed caption `cues` (text, start, end)
+    overlaid at the bottom. `overlays` are optional key-fact callouts (text, start, end, base_image)
+    placed on the frame's whitespace via `make_emphasis_png`. Shared by the main render
+    (`render_storyboard`) and the re-edit (`reassemble`)."""
+    overlays = overlays or []
+    vf = scene_filter("static", W, H, 1.0, FPS)  # static → scale/crop only; duration irrelevant
+    n = len(segments)
+    inputs: list[str] = []
+    for path, start, end in segments:
+        inputs += ["-loop", "1", "-t", f"{end - start:.3f}", "-i", str(path)]
+    inputs += ["-i", str(wav)]
+    audio_idx = n
+    # Both layers use the same timed full-frame PNG-overlay mechanism → build every overlay PNG once.
+    overlay_pngs: list[tuple[Path, float, float]] = []  # (png, start, end) in composite order
+    for k, (text, start, end) in enumerate(cues):
+        cap = out.with_name(f"{out.stem}_cap_{k}.png")
+        make_caption_png(text, cap)
+        overlay_pngs.append((cap, start, end))
+    for k, (text, start, end, base) in enumerate(overlays):
+        ep = out.with_name(f"{out.stem}_emph_{k}.png")
+        make_emphasis_png(text, ep, base)
+        overlay_pngs.append((ep, start, end))
+    for png, _, _ in overlay_pngs:
+        inputs += ["-i", str(png)]
+
+    chain = ";".join(f"[{j}:v]{vf}[s{j}]" for j in range(n))
+    chain += ";" + "".join(f"[s{j}]" for j in range(n)) + f"concat=n={n}:v=1:a=0[base]"
+    prev = "base"
+    for k, (_, start, end) in enumerate(overlay_pngs):
+        chain += (
+            f";[{prev}][{audio_idx + 1 + k}:v]"
+            f"overlay=0:0:enable='between(t,{start},{end})'[v{k}]"
+        )
+        prev = f"v{k}"
+
+    _run([
+        "ffmpeg", "-y", *inputs, "-filter_complex", chain,
+        "-map", f"[{prev}]", "-map", f"{audio_idx}:a",
+        "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-r", str(FPS),
+        "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-shortest", str(out),
+    ])
+    for png, _, _ in overlay_pngs:  # tidy the temp overlay PNGs (captions + callouts)
+        Path(png).unlink(missing_ok=True)
 
 
 def concat_audio(wavs: list[Path], out: Path) -> None:

@@ -56,6 +56,55 @@ def test_styled_prompt_character_ref_locks_to_one_reference_figure():
     assert "small simple group of white-headed stick people" in wide
 
 
+# ── key-fact callout renderer (whitespace placement, no black box) ─────────────
+def test_pick_callout_zone_finds_whitespace_and_flags_busy(tmp_path):
+    from PIL import Image
+
+    from tools import studio_poc
+
+    white = tmp_path / "white.png"
+    Image.new("RGB", (1024, 576), (245, 242, 235)).save(white)
+    res_white = studio_poc._pick_callout_zone(white)
+    assert res_white is not None  # clean near-white frame → a zone
+    assert res_white[4] is False  # is_busy should be False
+
+    busy = tmp_path / "busy.png"
+    Image.effect_noise((1024, 576), 128).convert("RGB").save(busy)
+    res_busy = studio_poc._pick_callout_zone(busy)
+    assert res_busy is not None  # we still return a zone
+    assert res_busy[4] is True  # is_busy should be True
+
+
+def test_make_emphasis_png_is_transparent_and_boxless(tmp_path):
+    from PIL import Image
+
+    from tools import studio_poc
+
+    base = tmp_path / "base.png"
+    Image.new("RGB", (1024, 576), (245, 242, 235)).save(base)
+    out = tmp_path / "emph.png"
+    studio_poc.make_emphasis_png("18,000 miles", out, base)
+    im = Image.open(out).convert("RGBA")
+    assert out.stat().st_size > 0 and im.size == (studio_poc.W, studio_poc.H)
+    assert im.getpixel((5, 5))[3] == 0  # corner fully transparent → no black box slapped over image
+
+
+def test_make_emphasis_png_renders_wobbly_card_when_whitespace_is_busy(tmp_path):
+    # A busy frame has no clean zone → render a wobbly paper card behind the text for readability.
+    from PIL import Image
+
+    from tools import studio_poc
+
+    busy = tmp_path / "busy.png"
+    Image.effect_noise((1024, 576), 128).convert("RGB").save(busy)
+    out = tmp_path / "emph.png"
+    studio_poc.make_emphasis_png("May 27", out, busy)
+    im = Image.open(out).convert("RGBA")
+    opaque = sum(im.getchannel("A").histogram()[201:])  # alpha > 200 pixel count
+    # the filled wobbly card is translucent/opaque, so the count is higher than text-only strokes.
+    assert opaque > 60000
+
+
 # ── scene filter (static hard-cut default; optional Ken-Burns) ─────────────────
 def test_static_is_the_default_and_has_no_motion():
     vf = scene_filter()  # default
@@ -287,6 +336,23 @@ def test_storyboard_from_dict_requires_scenes():
         storyboard_from_dict({"title": "T", "scenes": []})
 
 
+def test_scene_started_records_callout_and_intense(tmp_path):
+    # The manifest labels "callout frames" — emphasis + intense land in run.json for the dashboard.
+    import json
+
+    from studio.run_log import RunRecorder
+
+    rec = RunRecorder.create(
+        tmp_path, title="t", images_provider="agnes", voice_provider="cartesia", scene_count=1,
+    )
+    rec.scene_started(
+        0, "concept", "a route map", emphasis="18,000 miles", intense=True, frame_count=2
+    )
+    s0 = json.loads((rec.dir / "run.json").read_text())["scenes"][0]
+    assert s0["emphasis"] == "18,000 miles" and s0["intense"] is True
+    assert s0["frame_count"] == 2  # fire spot → dashboard shows both frames
+
+
 def test_frame_prompt_makes_extra_frames_clearly_distinct():
     from tools.studio_poc import _frame_prompt
 
@@ -295,6 +361,23 @@ def test_frame_prompt_makes_extra_frames_clearly_distinct():
     v1 = _frame_prompt(base, 1)
     assert base in v1 and "variation 1" in v1
     assert "DIFFERENT" in v1 and "near-duplicate" in v1  # forces a real cut, not a copy
+
+
+def test_set_callouts_records_the_flashed_plan(tmp_path):
+    # The dashboard shows WHICH callouts render, on which scene's frame, and when.
+    import json
+
+    from studio.run_log import RunRecorder
+
+    rec = RunRecorder.create(
+        tmp_path, title="t", images_provider="agnes", voice_provider="cartesia", scene_count=3,
+    )
+    rec.set_callouts([("Tsushima", 1, 12.3456), ("1905", 5, 62.0)])
+    callouts = json.loads((rec.dir / "run.json").read_text())["callouts"]
+    assert callouts == [
+        {"text": "Tsushima", "scene_index": 1, "start_sec": 12.346},
+        {"text": "1905", "scene_index": 5, "start_sec": 62.0},
+    ]
 
 
 def test_run_recorder_load_preserves_existing_manifest(tmp_path):
@@ -309,6 +392,16 @@ def test_run_recorder_load_preserves_existing_manifest(tmp_path):
     reloaded = RunRecorder.load(tmp_path, rec.run_id)
     assert reloaded.manifest.status == "pending_approval"
     assert [s.image_prompt for s in reloaded.manifest.scenes] == ["a lone figure"]
+
+
+def test_storyboard_from_dict_reads_emphasis_and_intense_with_defaults():
+    scenes = [
+        {"narration": "n", "image_prompt": "p", "emphasis": " 1905 ", "intense": True},
+        {"narration": "n2", "image_prompt": "p2"},  # both absent → "" / False
+    ]
+    sb = storyboard_from_dict({"title": "T", "scenes": scenes})
+    assert sb.scenes[0].emphasis == "1905" and sb.scenes[0].intense is True
+    assert sb.scenes[1].emphasis == "" and sb.scenes[1].intense is False
 
 
 # ── script prompts (the moat — encode tone + factual constraints) ──────────────
