@@ -43,3 +43,12 @@ model appended a second object / commentary after the storyboard, so the slice s
 first `{` (parses exactly one complete value, ignores anything trailing) instead of a greedy
 `{`…`}` slice. Add a `not isinstance(obj, dict)` guard. Local models routinely emit extra prose/objects.
 
+## 2026-07-03 — Resume must reuse saved narration + spans, not just skip frames
+**Pattern:** Frame-level resume (`if resume and target.is_file(): continue`) already reused images, but
+`render_storyboard` still re-ran `build_narration` every resume — a fresh Cartesia call (cost) whose new
+timings could desync the reused frames.
+**Rule:** Persist per-beat spans to `beat_spans.json` on first synth; on `--resume`, if `narration.wav` +
+spans exist (and span count == scene count), load them and SKIP `build_narration` entirely. Also record a
+truthful `resume_note` in the manifest ("N/M frames on disk — continuing at scene X") so the dashboard
+shows real progress instead of looking like a fresh start.
+
