@@ -6,6 +6,7 @@ from studio.narration import (
     align_beats,
     build_transcript,
     caption_timeline,
+    emphasis_timeline,
     frames_for_span,
     image_timeline,
 )
@@ -104,3 +105,50 @@ def test_caption_timeline_offsets_cues_into_their_beat_span():
     # every cue lies within the video; beat-1 cues start at/after 4.0s.
     assert all(0.0 <= s <= e <= 7.0 for _, s, e in cues)
     assert any(s >= 4.0 for _, s, _ in cues)
+
+
+# ── emphasis_timeline ────────────────────────────────────────────────────────
+def test_emphasis_timeline_emits_only_marked_beats_with_index_and_span():
+    spans = [(0.0, 4.0), (4.0, 11.0), (11.0, 15.0)]
+    emphases = ["", "18,000 miles", "   "]  # only the middle beat is a real callout
+    assert emphasis_timeline(spans, emphases) == [("18,000 miles", 1, 4.0, 11.0)]
+
+
+def test_emphasis_timeline_is_empty_when_no_beat_is_marked():
+    assert emphasis_timeline([(0.0, 4.0), (4.0, 8.0)], ["", ""]) == []
+
+
+def test_emphasis_timeline_enforces_minimum_spacing_between_callouts():
+    # Four marked beats close together; with a 35s gap only the first + one ~40s later survive,
+    # so callouts stay rare (~2-3 per 90s) even when the analysis pass over-proposes.
+    spans = [(0.0, 10.0), (10.0, 20.0), (20.0, 30.0), (40.0, 50.0)]
+    emphases = ["A", "B", "C", "D"]
+    kept = emphasis_timeline(spans, emphases, min_gap_sec=35.0)
+    assert [(t, i) for t, i, _s, _e in kept] == [("A", 0), ("D", 3)]  # B, C dropped (too soon)
+
+
+def test_emphasis_timeline_times_the_callout_to_the_spoken_phrase():
+    # The phrase sits late in the beat → the callout appears near (just before) when it is spoken,
+    # not at the beat start; it holds until the beat ends.
+    spans = [(0.0, 20.0)]
+    narr = "the two fleets circled all morning before they finally met at Tsushima"
+    (text, i, start, end) = emphasis_timeline(spans, ["Tsushima"], [narr])[0]
+    assert text == "Tsushima" and i == 0 and end == 20.0
+    spoken = 20.0 * (narr.lower().index("tsushima") / len(narr))  # ~ when the word is said
+    assert start < spoken  # lands on/before the word (a lead is subtracted)
+    assert start > 8.0  # and NOT at the beat start — it's synced to the late phrase
+
+
+def test_emphasis_timeline_falls_back_to_beat_start_when_phrase_not_found():
+    # Callout text not present in the narration (or no narration) → show from the start of the beat.
+    spans = [(4.0, 14.0)]
+    out = emphasis_timeline(spans, ["1905"], ["no year appears in this spoken line at all"])
+    assert out == [("1905", 0, 4.0, 14.0)]
+
+
+def test_emphasis_timeline_clamps_start_to_keep_min_hold():
+    # A phrase at the very end of the beat is pulled earlier so it's on screen >= min_hold seconds.
+    spans = [(0.0, 10.0)]
+    narr = "a long calm windup and then, right at the very end, Tsushima"
+    (_t, _i, start, end) = emphasis_timeline(spans, ["Tsushima"], [narr], min_hold_sec=2.0)[0]
+    assert end == 10.0 and start <= 8.0  # end - min_hold

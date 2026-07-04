@@ -16,6 +16,7 @@ from studio.narration import (
     align_beats,
     build_transcript,
     caption_timeline,
+    emphasis_timeline,
     frames_for_span,
     image_timeline,
 )
@@ -50,6 +51,7 @@ __all__ = [
     "build_transcript",
     "align_beats",
     "caption_timeline",
+    "emphasis_timeline",
     "image_timeline",
     "frames_for_span",
     "DEMO_STORYBOARD",
