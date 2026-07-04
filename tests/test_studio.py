@@ -421,6 +421,33 @@ def test_run_recorder_load_preserves_existing_manifest(tmp_path):
     assert [s.image_prompt for s in reloaded.manifest.scenes] == ["a lone figure"]
 
 
+# ── Agnes content-policy soften-and-retry ──────────────────────────────────────
+def test_is_content_policy_error_detects_the_block():
+    from studio import agnes
+
+    body = {"error": {
+        "message": "Unable to generate this content. Please modify your prompt and try again.",
+        "code": "content_policy_violation",
+    }}
+    assert agnes.is_content_policy_error(400, body) is True
+    assert agnes.is_content_policy_error(400, "content_policy_violation") is True
+    assert agnes.is_content_policy_error(429, body) is False  # rate-limit, not a policy block
+    assert agnes.is_content_policy_error(400, {"error": {"code": "invalid_size"}}) is False
+
+
+def test_soften_prompt_neutralises_graphic_words_and_escalates():
+    from studio import agnes
+
+    p = "a soldier stabbed with a bloody knife next to a corpse"
+    lvl1 = agnes.soften_prompt(p, 1).lower()
+    for graphic in ("stabbed", "bloody", "knife", "corpse"):
+        assert graphic not in lvl1  # each graphic word swapped for a mild synonym
+    assert "family-friendly" in lvl1  # safety note appended
+    assert "nothing graphic" in agnes.soften_prompt(p, 3).lower()  # blunt framing at the top level
+    # ordinary history words (war/battle) are NOT neutered — that would flatten every video
+    assert "war" in agnes.soften_prompt("a great war and battle", 2).lower()
+
+
 def test_storyboard_from_dict_reads_emphasis_and_intense_with_defaults():
     scenes = [
         {"narration": "n", "image_prompt": "p", "emphasis": " 1905 ", "intense": True},
