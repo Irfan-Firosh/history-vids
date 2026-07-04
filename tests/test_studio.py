@@ -219,6 +219,21 @@ def test_parse_json_block_handles_bare_object_with_prose():
     assert parse_json_block('blah {"a": 1} trailing')["a"] == 1
 
 
+def test_parse_json_block_ignores_trailing_extra_data():
+    # Local models sometimes append a second object / commentary after the storyboard.
+    text = '{"title": "T", "scenes": [1, 2]}\n{"stray": true}\nextra prose'
+    assert parse_json_block(text) == {"title": "T", "scenes": [1, 2]}
+
+
+def test_parse_json_block_repairs_malformed_local_model_json():
+    # Local models emit slightly-broken JSON: a missing comma between fields, and an unescaped inner
+    # quote inside a string (the exact "Expecting ',' delimiter" failure). Both must be salvaged.
+    assert parse_json_block('{"title": "T" "scenes": []}') == {"title": "T", "scenes": []}
+    assert parse_json_block('{"queries": ["the "lost" fleet", "tsushima"]}')["queries"][1] == (
+        "tsushima"
+    )
+
+
 def test_parse_json_block_raises_when_no_json():
     with pytest.raises(LLMError):
         parse_json_block("no object here")
