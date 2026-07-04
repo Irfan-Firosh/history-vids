@@ -75,6 +75,36 @@ def test_pick_callout_zone_finds_whitespace_and_flags_busy(tmp_path):
     assert res_busy[4] is True  # is_busy should be True
 
 
+def test_make_emphasis_png_is_transparent_and_boxless(tmp_path):
+    from PIL import Image
+
+    from tools import studio_poc
+
+    base = tmp_path / "base.png"
+    Image.new("RGB", (1024, 576), (245, 242, 235)).save(base)
+    out = tmp_path / "emph.png"
+    studio_poc.make_emphasis_png("18,000 miles", out, base)
+    im = Image.open(out).convert("RGBA")
+    assert out.stat().st_size > 0 and im.size == (studio_poc.W, studio_poc.H)
+    assert im.getpixel((5, 5))[3] == 0  # corner fully transparent → no black box slapped over image
+
+
+def test_make_emphasis_png_renders_wobbly_card_when_whitespace_is_busy(tmp_path):
+    # A busy frame has no clean zone → render a wobbly paper card behind the text for readability.
+    from PIL import Image
+
+    from tools import studio_poc
+
+    busy = tmp_path / "busy.png"
+    Image.effect_noise((1024, 576), 128).convert("RGB").save(busy)
+    out = tmp_path / "emph.png"
+    studio_poc.make_emphasis_png("May 27", out, busy)
+    im = Image.open(out).convert("RGBA")
+    opaque = sum(im.getchannel("A").histogram()[201:])  # alpha > 200 pixel count
+    # the filled wobbly card is translucent/opaque, so the count is higher than text-only strokes.
+    assert opaque > 60000
+
+
 # ── scene filter (static hard-cut default; optional Ken-Burns) ─────────────────
 def test_static_is_the_default_and_has_no_motion():
     vf = scene_filter()  # default

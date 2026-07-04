@@ -59,6 +59,20 @@ def _fontfile() -> str | None:
     return next((f for f in _FONT_CANDIDATES if os.path.exists(f)), None)
 
 
+# Key-fact callouts use a casual handwritten face (Schoolbell, OFL — committed to assets/fonts/);
+# fall back to an installed hand-drawn font, then anything, so a missing file never breaks a run.
+_CALLOUT_FONT_CANDIDATES = [
+    str(_ROOT / "assets/fonts/Schoolbell.ttf"),
+    "/System/Library/Fonts/Supplemental/Chalkduster.ttf",
+    "/System/Library/Fonts/Supplemental/Bradley Hand Bold.ttf",
+    "/System/Library/Fonts/Supplemental/Comic Sans MS.ttf",
+]
+
+
+def _callout_fontfile() -> str | None:
+    return next((f for f in _CALLOUT_FONT_CANDIDATES if os.path.exists(f)), None) or _fontfile()
+
+
 def _run(cmd: list[str]) -> None:
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
@@ -632,6 +646,94 @@ def _pick_callout_zone(base_image: Path) -> tuple[int, int, int, int] | None:
     fx, fy = best
     is_busy = bool(best_std > _CALLOUT_MAX_STD)
     return (int(fx * W), int(fy * H), int(_CALLOUT_BOX_WF * W), int(_CALLOUT_BOX_HF * H), is_busy)
+
+
+def _fit_callout_text(draw, text: str, font_path: str | None, max_w: int, max_h: int):
+    """Largest font size (Schoolbell) at which `text` word-wraps inside (max_w, max_h). Returns
+    (lines, font, line_height)."""
+    from PIL import ImageFont
+
+    for size in range(112, 42, -6):
+        font = ImageFont.truetype(font_path, size) if font_path else ImageFont.load_default()
+        words, lines, cur = text.split(), [], ""
+        for wd in words:
+            trial = f"{cur} {wd}".strip()
+            if draw.textlength(trial, font=font) <= max_w or not cur:
+                cur = trial
+            else:
+                lines.append(cur)
+                cur = wd
+        if cur:
+            lines.append(cur)
+        line_h = int(size * 1.25)
+        widest = max((draw.textlength(ln, font=font) for ln in lines), default=0)
+        if (widest <= max_w and line_h * len(lines) <= max_h) or font_path is None:
+            return lines, font, line_h
+    font = ImageFont.truetype(font_path, 44) if font_path else ImageFont.load_default()
+    return [text], font, 54
+
+
+def make_emphasis_png(text: str, out: Path, base_image: Path | None = None) -> None:
+    """Render a full-frame transparent key-fact callout.
+
+    If the selected zone is too busy, a hand-drawn paper card is drawn behind the text to guarantee
+    legibility. Safe off-center fallback is used if no image is available.
+    """
+    from PIL import Image, ImageDraw
+
+    text = _clean_caption(text).strip()
+    im = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    ff = _callout_fontfile()
+
+    zone_res = _pick_callout_zone(base_image) if base_image else None
+    if zone_res is None:
+        # Default off-center fallback (top-left) if no image or scan failed
+        zw, zh = int(W * 0.42), int(H * 0.16)
+        zx, zy = int(W * 0.05), int(H * 0.07)
+        is_busy = False
+    else:
+        zx, zy, zw, zh, is_busy = zone_res
+
+    # Draw a wobbly hand-drawn paper card background if the zone is busy
+    if is_busy:
+        import random
+        pad = 12
+        rx0, ry0 = zx + pad, zy + pad
+        rx1, ry1 = zx + zw - pad, zy + zh - pad
+        
+        # Subdivide rectangle edges to make them wobbly
+        points = []
+        for x in range(rx0, rx1 + 1, 40):
+            points.append((x, ry0 + random.randint(-4, 4)))
+        for y in range(ry0 + 40, ry1 + 1, 40):
+            points.append((rx1 + random.randint(-4, 4), y))
+        for x in range(rx1 - 40, rx0 - 1, -40):
+            points.append((x, ry1 + random.randint(-4, 4)))
+        for y in range(ry1 - 40, ry0 - 1, -40):
+            points.append((rx0 + random.randint(-4, 4), y))
+            
+        # Draw the filled paper card (translucent off-white)
+        d.polygon(points, fill=(244, 240, 232, 230))
+        
+        # Draw a sketchy double outline
+        for _ in range(2):
+            outline_points = []
+            for pt in points:
+                outline_points.append((pt[0] + random.randint(-1, 1), pt[1] + random.randint(-1, 1)))
+            d.polygon(outline_points, outline=(40, 40, 40, 225), width=2)
+
+    lines, font, line_h = _fit_callout_text(d, text, ff, zw - 48, zh - 24)
+    block_h = line_h * len(lines)
+    top = zy + (zh - block_h) // 2
+    cx = zx + zw // 2
+
+    for ln in lines:
+        w = d.textlength(ln, font=font)
+        d.text((cx - w / 2, top), ln, font=font, fill=(20, 20, 20, 255),
+               stroke_width=4, stroke_fill=(255, 255, 255, 235))
+        top += line_h
+    im.save(out)
 
 
 def concat_audio(wavs: list[Path], out: Path) -> None:
