@@ -62,3 +62,13 @@ spans exist (and span count == scene count), load them and SKIP `build_narration
 truthful `resume_note` in the manifest ("N/M frames on disk — continuing at scene X") so the dashboard
 shows real progress instead of looking like a fresh start.
 
+## 2026-07-03 — Callout overlay: transparent black text on the image's whitespace (not a black box)
+**Correction:** The first key-fact overlay used white text on a black semi-transparent panel; the user
+rejected the "black background put over images." They want the callout on an EMPTY patch of the actual
+image, black text, transparent bg, in the Schoolbell (Google Fonts, OFL) handwritten font — falling
+back to a soft white card only when there's no clean whitespace.
+**Rule:** For on-image text overlays, detect whitespace (`_pick_callout_zone`: score candidate zones by
+brightness − roughness, skip the subtitle band + dead-center) and composite black text with a thin
+white halo there; card fallback only when no zone is clean. Show the user a rendered sample and get a
+taste sign-off before building — this callout has now flipped 3× (build → remove → rebuild restyled).
+
