@@ -297,6 +297,20 @@ def test_frame_prompt_makes_extra_frames_clearly_distinct():
     assert "DIFFERENT" in v1 and "near-duplicate" in v1  # forces a real cut, not a copy
 
 
+def test_run_recorder_load_preserves_existing_manifest(tmp_path):
+    # approve/regenerate run as separate processes → they must re-open, not reset, the manifest.
+    from studio.run_log import RunRecorder
+
+    rec = RunRecorder.create(
+        tmp_path, title="t", images_provider="agnes", voice_provider="say", scene_count=2,
+    )
+    rec.scene_started(0, "character", "a lone figure")
+    rec.pending_approval()
+    reloaded = RunRecorder.load(tmp_path, rec.run_id)
+    assert reloaded.manifest.status == "pending_approval"
+    assert [s.image_prompt for s in reloaded.manifest.scenes] == ["a lone figure"]
+
+
 # ── script prompts (the moat — encode tone + factual constraints) ──────────────
 def test_script_system_prompt_encodes_tone_and_constraints():
     p = SCRIPT_SYSTEM_PROMPT.lower()

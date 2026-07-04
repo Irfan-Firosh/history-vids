@@ -64,6 +64,12 @@ class RunRequest(BaseModel):
     review: bool = True
 
 
+class ResumeRequest(BaseModel):
+    """Resume payload — reuse frames on disk; subtitles can be toggled on the resume."""
+
+    captions: bool = True
+
+
 # ── helpers ───────────────────────────────────────────────────────────────────
 def _run_dir(run_id: str) -> Path:
     """Resolve a run dir, rejecting any id that escapes RUNS_DIR (path-traversal guard)."""
@@ -91,6 +97,22 @@ def _is_active(run_id: str, mode: str | None = None) -> bool:
         if proc is None or proc.poll() is not None or _active["run_id"] != run_id:
             return False
         return mode is None or _active.get("mode") == mode
+
+
+def _resume_state(run_dir: Path, run_id: str, manifest: dict) -> dict:
+    """Whether a stopped/failed run can be resumed (reuse frames already on disk).
+
+    Needs a saved ``storyboard.json``; only offered for runs that aren't finished and aren't the
+    live process (a failed or interrupted run). Hidden while awaiting review approval — the images
+    are already all there; the pending action is Approve, not Resume.
+    """
+    running = _is_active(run_id)
+    resumable = (
+        (run_dir / "storyboard.json").is_file()
+        and manifest.get("status") not in ("completed", "pending_approval")
+        and not running
+    )
+    return {"available": resumable, "running": _is_active(run_id, "resume")}
 
 
 # ── routes ────────────────────────────────────────────────────────────────────
@@ -211,3 +233,48 @@ def _spawn_run(req: RunRequest) -> str:
 def trigger_run(req: RunRequest) -> dict[str, str]:
     """Spawn a pipeline run in the background; return its run_id to poll. 409 if one is live."""
     return {"run_id": _spawn_run(req)}
+
+
+@app.post("/api/runs/{run_id}/resume", status_code=202)
+def resume_run(run_id: str, req: ResumeRequest) -> dict[str, object]:
+    """Resume a stopped/failed run: re-render reusing the frames already on disk (``--resume``).
+
+    Reconstructs the run's providers from its manifest and adds a fallback model for any frame the
+    primary refuses, so a mid-cycle stop can be picked up without redoing completed frames.
+    """
+    run_dir = _run_dir(run_id)  # 404 + traversal-guarded
+    storyboard = run_dir / "storyboard.json"
+    if not storyboard.is_file():
+        raise HTTPException(status_code=400, detail="run has no saved storyboard to resume")
+    manifest = _read_manifest(run_dir) or {}
+    provider = str(manifest.get("images_provider") or "gemini")
+    voice = "cartesia" if str(manifest.get("voice_provider", "")).startswith("cartesia") else "say"
+
+    with _lock:
+        proc = _active["proc"]
+        if proc is not None and proc.poll() is None:
+            raise HTTPException(
+                status_code=409, detail=f"run {_active['run_id']} still in progress"
+            )
+        cmd = [
+            sys.executable, str(POC_SCRIPT),
+            "--storyboard", str(storyboard), "--run-id", run_id, "--resume", "--voice", voice,
+        ]
+        # Reconstruct the image providers ("char/concept" per-role, else a single --images mode).
+        if "/" in provider:
+            char, concept = (provider.split("/") + [provider])[:2]
+            cmd += ["--char-model", char, "--concept-model", concept]
+        else:
+            char = provider
+            cmd += ["--images", provider]
+        # Fallback for refused frames: a different reliable model than the primary character model.
+        cmd += ["--fallback", "agnes" if char == "gemini" else "gemini"]
+        if not req.captions:
+            cmd.append("--no-captions")
+        log = (run_dir / "resume.log").open("w", encoding="utf-8")
+        proc = subprocess.Popen(
+            cmd, cwd=str(REPO_ROOT), stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
+        )
+        log.close()
+        _active.update(run_id=run_id, proc=proc, mode="resume")
+    return {"run_id": run_id, "resuming": True, "captions": req.captions}
