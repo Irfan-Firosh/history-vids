@@ -56,6 +56,25 @@ def test_styled_prompt_character_ref_locks_to_one_reference_figure():
     assert "small simple group of white-headed stick people" in wide
 
 
+# ── key-fact callout renderer (whitespace placement, no black box) ─────────────
+def test_pick_callout_zone_finds_whitespace_and_flags_busy(tmp_path):
+    from PIL import Image
+
+    from tools import studio_poc
+
+    white = tmp_path / "white.png"
+    Image.new("RGB", (1024, 576), (245, 242, 235)).save(white)
+    res_white = studio_poc._pick_callout_zone(white)
+    assert res_white is not None  # clean near-white frame → a zone
+    assert res_white[4] is False  # is_busy should be False
+
+    busy = tmp_path / "busy.png"
+    Image.effect_noise((1024, 576), 128).convert("RGB").save(busy)
+    res_busy = studio_poc._pick_callout_zone(busy)
+    assert res_busy is not None  # we still return a zone
+    assert res_busy[4] is True  # is_busy should be True
+
+
 # ── scene filter (static hard-cut default; optional Ken-Burns) ─────────────────
 def test_static_is_the_default_and_has_no_motion():
     vf = scene_filter()  # default

@@ -562,6 +562,78 @@ def make_caption_png(text: str, out: Path) -> None:
     im.save(out)
 
 
+#: The callout box, as fractions of the frame: a wide, short band the text word-wraps inside.
+_CALLOUT_BOX_WF, _CALLOUT_BOX_HF = 0.42, 0.16
+#: Search bounds (frame fractions): stay out of the bottom subtitle band and off the very edges.
+_CALLOUT_TOP_MARGIN, _CALLOUT_SIDE_MARGIN, _CALLOUT_SUBTITLE_TOP = 0.05, 0.03, 0.74
+#: Above this local roughness (grayscale std, 0-255) even the flattest region is too busy for
+#: text — the caller then falls back to a sensible default spot (still text-only, no card).
+_CALLOUT_MAX_STD = 34.0
+#: Cap the scan resolution: big enough to preserve real detail/noise (so busy frames score busy),
+#: small enough to stay fast. Frames are only downscaled if larger than this on the long side.
+_CALLOUT_SCAN_MAX_DIM = 1280
+
+
+def _pick_callout_zone(base_image: Path) -> tuple[int, int, int, int] | None:
+    """Find the emptiest (flattest) region of the frame to drop the callout onto — returns an
+    (x, y, w, h) box in OUTPUT-frame pixels, or None when even the best region is too busy (the
+    caller then uses a default spot).
+
+    Rather than a handful of fixed candidate zones, this slides the callout box across the whole
+    usable area (above the subtitle band) and scores every position by local *flatness* using an
+    integral image (summed-area table) so each window's mean/variance is O(1). Flat, uncluttered
+    areas — an empty sky, a plain wall — win; busy/inky areas lose. A mild bonus prefers lighter
+    regions and the sides/top (the subject usually sits low-center), but flatness dominates so the
+    text lands on genuine whitespace, wherever it actually is in this particular image."""
+    import numpy as np
+    from PIL import Image
+
+    try:
+        im = Image.open(base_image).convert("L")
+    except (OSError, ValueError):
+        return None
+    if max(im.size) > _CALLOUT_SCAN_MAX_DIM:  # bound cost; only downscale oversized frames
+        im.thumbnail((_CALLOUT_SCAN_MAX_DIM, _CALLOUT_SCAN_MAX_DIM))
+    arr = np.asarray(im, dtype=np.float64)
+    sh, sw = arr.shape
+    wpx, hpx = max(1, int(_CALLOUT_BOX_WF * sw)), max(1, int(_CALLOUT_BOX_HF * sh))
+
+    # Summed-area tables of values and squared values → O(1) window sum for mean + variance.
+    ii = np.zeros((sh + 1, sw + 1))
+    ii2 = np.zeros((sh + 1, sw + 1))
+    ii[1:, 1:] = arr.cumsum(0).cumsum(1)
+    ii2[1:, 1:] = (arr * arr).cumsum(0).cumsum(1)
+
+    def _win(table, y0, x0):  # sum over [y0:y0+hpx, x0:x0+wpx]
+        return (table[y0 + hpx, x0 + wpx] - table[y0, x0 + wpx]
+                - table[y0 + hpx, x0] + table[y0, x0])
+
+    y_lo, x_lo = int(_CALLOUT_TOP_MARGIN * sh), int(_CALLOUT_SIDE_MARGIN * sw)
+    y_hi = int(_CALLOUT_SUBTITLE_TOP * sh) - hpx
+    x_hi = sw - wpx - int(_CALLOUT_SIDE_MARGIN * sw)
+    n = wpx * hpx
+    ystep, xstep = max(1, hpx // 3), max(1, wpx // 4)
+
+    best, best_score, best_std = None, float("-inf"), 0.0
+    for y0 in range(y_lo, max(y_lo, y_hi) + 1, ystep):
+        for x0 in range(x_lo, max(x_lo, x_hi) + 1, xstep):
+            mean = _win(ii, y0, x0) / n
+            std = (max(0.0, _win(ii2, y0, x0) / n - mean * mean)) ** 0.5
+            cx, cy = (x0 + wpx / 2) / sw, (y0 + hpx / 2) / sh
+            # Flatness (−std) dominates; small nudges toward lighter, off-center, upper regions.
+            score = -std + (mean / 255) * 8 + abs(cx - 0.5) * 12 + (1 - cy) * 6
+            # Avoid the horizontal center (middle 35%) where character head/body stands
+            if 0.325 <= cx <= 0.675:
+                score -= 100.0
+            if score > best_score:
+                best_score, best, best_std = score, (x0 / sw, y0 / sh), std
+    if best is None:
+        return None
+    fx, fy = best
+    is_busy = bool(best_std > _CALLOUT_MAX_STD)
+    return (int(fx * W), int(fy * H), int(_CALLOUT_BOX_WF * W), int(_CALLOUT_BOX_HF * H), is_busy)
+
+
 def concat_audio(wavs: list[Path], out: Path) -> None:
     """Join per-beat wavs into one continuous narration track (the `say` offline path)."""
     inputs: list[str] = []
