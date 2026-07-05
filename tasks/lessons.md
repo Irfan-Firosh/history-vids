@@ -139,6 +139,16 @@ warn to stderr (never silently swallow — surface "skipped N malformed beats"),
 NOTHING usable survives. Default optional top-level fields (`title`) instead of `KeyError`-ing. One bad
 beat in a 45-beat script must not throw away the whole (paid) run. See [[content-hash-cache-pattern]].
 
+## 2026-07-04 — Picking up work another agent started: read the CURRENT file state first
+**Correction:** The user ran a parallel Antigravity session that edited `studio_poc.py`, `style.py`,
+`script_prompt.py`, `run_log.py`, `tests/` on top of my uncommitted work — including doing several of
+my pending asks (removed the stick-figure nose, added irregular hand-drawn line-work, per-scene
+clothing variation) and a `pending_approval()` stub. I nearly re-implemented things already done.
+**Rule:** When told another agent/session touched the repo, re-read the current files BEFORE editing —
+`git status`/`git log`, then read the actual functions. The Read tool may serve a STALE cached copy
+("wasted call — unchanged"); force fresh content with an `offset`/`limit` read or `grep`. Build ON their
+changes, don't clobber. Confirm which asks are already satisfied instead of duplicating them.
+
 ## 2026-07-04 — HITL gate: split a long detached pipeline into phases behind the run lock
 **Pattern:** The user wanted human review — generate all images, then assemble ONLY after approval,
 with per-image regenerate. The pipeline was one detached subprocess (research→script→images→assemble).
