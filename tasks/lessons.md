@@ -175,6 +175,19 @@ accurate cultural hair+dress while animals stayed normal cartoons. Scope selecti
 stick figures; animals, objects and background are normal cartoons (not stick figures)." Verified on
 real Agnes renders (the only way to catch this — the constraint gap is invisible in the prompt text).
 
+## 2026-07-05 — When a user keeps rejecting a style, they usually want it SIMPLER/cruder, not more refined
+**Correction:** After "wobbly sketchy" (rejected) and a polished clean-Axen cartoon (rejected), the user
+snapped: "it should be a GOOFY stickman style, is that so hard?" My prompts kept adding *richness* (cream
+heads, hair/beard, furnished rooms, "clean/refined/explainer," "serious not comedic") — pulling AWAY from
+what they wanted. The fix was to STRIP it down and push the opposite adjectives: goofy, crude, minimal,
+silly, comedic, exaggerated; plain blank round head, dot eyes, one big squiggle mouth, noodly stick
+limbs, plain flat background. That rendered as an obvious goofy stickman and landed.
+**Rule:** Repeated style rejection ≠ "add more detail / polish." It usually means "too much" — go
+CRUDER and SIMPLER, and lead with the vibe word the user used (goofy/silly/crude) over craft words
+(clean/refined/detailed). Flip "serious" ↔ "comedic" to match their tone. Always confirm with a real
+render (never claim a look from the prompt alone). Grounding in reference frames is good, but the user's
+taste can be goofier/simpler than the reference — their word wins.
+
 ## 2026-07-04 — Ground a style prompt in REAL reference frames; "hand-drawn" ≠ "sketchy scribble"
 **Correction:** The art style read as messy/scribbly. Root cause: the prompt said "wobbly pencil/ink
 textures, irregular sketchy hand-drawn ink outlines" — which pushes a pencil-scribble look. Downloading
