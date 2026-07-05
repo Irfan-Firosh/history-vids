@@ -129,3 +129,10 @@ found → beat_start (safe). Keep the change in the pure `emphasis_timeline` (th
 downstream (`set_callouts`, dashboard "Planned callouts") picks up the new time for free. Verified:
 "Tsushima" at char 62/70 of a 20s beat → callout at 17.4s (was 0.0s for the whole beat).
 
+## 2026-07-04 — Enforce callout sparsity as a render-time guardrail, not just in the prompt
+**Correction:** "Only ~2-3 callouts per 1.5 min" — but relying on the analysis prompt ("~1 in 5") let
+clusters through. **Rule:** Cap density where the real timeline lives (`emphasis_timeline`, which has the
+beat spans): greedily enforce a **minimum gap** (~35s) between kept callouts — a hard guardrail
+independent of how many the LLM proposes — AND tell the model to be sparse. Compute the surviving set
+ONCE, then drive both the rendered overlays and the dashboard badges/plan from it so they always match.
+
