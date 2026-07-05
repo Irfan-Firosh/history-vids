@@ -117,6 +117,18 @@ is in *this* frame. Verify empirically: composite the callout over several real 
 eyeball it (did it on cave/torch/cave-wall/night-sky samples — all landed on genuine whitespace).
 Keep a std ceiling so a fully-busy frame returns None (caller uses a default spot).
 
+## 2026-07-04 — Tolerate PARTIAL beats from the LLM: drop the bad one, keep the run
+**Correction:** A run died at `storyboard_from_dict` with `KeyError: 'image_prompt'` — the local
+gpt-oss model emitted one scene missing a required key, and the parser indexed keys directly
+(`s["image_prompt"]`, `s["narration"]`, `data["title"]`), so a single malformed beat aborted the whole
+run *after* research + script-gen had already been spent. Same failure class as the JSON `raw_decode`
+fix: local models routinely emit *structurally-fine-but-content-incomplete* output.
+**Rule:** At the parse boundary, validate each item and **skip** the unrenderable ones (a beat needs BOTH
+`narration` and `image_prompt`; also guard non-dict entries) rather than hard-indexing — keep the rest,
+warn to stderr (never silently swallow — surface "skipped N malformed beats"), and only fail loudly if
+NOTHING usable survives. Default optional top-level fields (`title`) instead of `KeyError`-ing. One bad
+beat in a 45-beat script must not throw away the whole (paid) run. See [[content-hash-cache-pattern]].
+
 ## 2026-07-04 — Time an on-screen callout to its SPOKEN moment (estimate, land on/before the word)
 **Correction:** The key-fact PIL callout showed for the WHOLE beat; the user wants it to appear when
 its phrase is actually spoken. We have per-beat Cartesia spans but not per-word times.
