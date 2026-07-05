@@ -117,3 +117,15 @@ is in *this* frame. Verify empirically: composite the callout over several real 
 eyeball it (did it on cave/torch/cave-wall/night-sky samples — all landed on genuine whitespace).
 Keep a std ceiling so a fully-busy frame returns None (caller uses a default spot).
 
+## 2026-07-04 — Time an on-screen callout to its SPOKEN moment (estimate, land on/before the word)
+**Correction:** The key-fact PIL callout showed for the WHOLE beat; the user wants it to appear when
+its phrase is actually spoken. We have per-beat Cartesia spans but not per-word times.
+**Rule:** Estimate the phrase's spoken moment the way the rest of the pipeline estimates in-beat timing
+— **proportionally to text length** (like `align_beats` / `captions.cue_timings`): find the phrase's
+character offset in the beat narration, scale by beat duration, then subtract a small **lead** (~0.3s)
+so it lands **on or before** the word (the user's tolerance). Clamp `start` to `[beat_start,
+beat_end − min_hold]` so it stays readable and never precedes its beat; hold to beat end. Phrase not
+found → beat_start (safe). Keep the change in the pure `emphasis_timeline` (thread `narrations` in);
+downstream (`set_callouts`, dashboard "Planned callouts") picks up the new time for free. Verified:
+"Tsushima" at char 62/70 of a 20s beat → callout at 17.4s (was 0.0s for the whole beat).
+
