@@ -117,6 +117,16 @@ is in *this* frame. Verify empirically: composite the callout over several real 
 eyeball it (did it on cave/torch/cave-wall/night-sky samples — all landed on genuine whitespace).
 Keep a std ceiling so a fully-busy frame returns None (caller uses a default spot).
 
+## 2026-07-04 — A "locked" aesthetic can be re-opened; optimise for consistency + low error rate
+**Correction:** Style had been "locked to ligne claire" after a bake-off. The user reversed it back to a
+**refined stick-figure** look (round white head, thin black stick body, minimal face, serious explainer
+tone — Axen-style), because that design is *easiest to keep on-model across ~60 images and least likely
+to garble anatomy/hands/text*.
+**Rule:** Don't treat a locked visual decision as permanent. For a faceless pipeline generating dozens of
+frames per video, cross-frame **consistency + low failure rate** often beats a "nicer" but more complex
+look — a simpler design is a feature, not a downgrade. When the user shows a reference frame + a written
+spec, follow the spec literally in `LOCKED_STYLE`/`CONCEPT_STYLE` and update the stale lesson.
+
 ## 2026-07-04 — Tolerate PARTIAL beats from the LLM: drop the bad one, keep the run
 **Correction:** A run died at `storyboard_from_dict` with `KeyError: 'image_prompt'` — the local
 gpt-oss model emitted one scene missing a required key, and the parser indexed keys directly
