@@ -151,6 +151,22 @@ endpoint re-draws one scene's frame(s) and stays in `pending_approval`. Critical
 wipe the scenes/callouts a follow-up phase must preserve. Verified the gate offline (placeholder + `say`):
 `--review` stops at `pending_approval` with no video; `--assemble-only` then produces it + `completed`.
 
+## 2026-07-04 — Ground a style prompt in REAL reference frames; "hand-drawn" ≠ "sketchy scribble"
+**Correction:** The art style read as messy/scribbly. Root cause: the prompt said "wobbly pencil/ink
+textures, irregular sketchy hand-drawn ink outlines" — which pushes a pencil-scribble look. Downloading
+the actual Axen reference video (`yt-dlp` → `ffmpeg` frame extract into gitignored
+`result/axen/style_refs/…`) and READING the frames showed the true look: **clean, confident, SOLID
+black outlines** (only a *subtle* hand-drawn quality), round off-white heads, simple faces (no nose),
+thin solid limbs, flat warm muted colors, lightly-furnished backgrounds. The organic/rough quality
+lives ONLY in hair/beard texture — not the main linework.
+**Rule:** Don't write a visual-style prompt from imagination — pull real reference frames first and
+match them literally. "Hand-drawn / minimalist" is ambiguous: be explicit that outlines are CLEAN and
+SOLID (not sketchy/pencil) unless the frames actually show scribble. VERIFY by rendering a few frames
+(one per shot_type: character, map, concept) with the real provider and eyeballing them side-by-side
+against the reference — the offline placeholder can't show style. Keep the prompt-doc mirror
+(`prompts/02`, `prompts/04`) and the ref-sheet generator (`tools/make_refs.py`) in sync with
+`studio/style.py`. Verified: 3 Agnes frames matched Axen's frame_004 / frame_095 / frame_03.
+
 ## 2026-07-04 — Time an on-screen callout to its SPOKEN moment (estimate, land on/before the word)
 **Correction:** The key-fact PIL callout showed for the WHOLE beat; the user wants it to appear when
 its phrase is actually spoken. We have per-beat Cartesia spans but not per-word times.
