@@ -93,3 +93,14 @@ append it on EVERY image-prompt path in `styled_prompt` (character/wide/concept/
 — a test asserts this for every shot_type. Never inject callout/fact text into an image_prompt. A prompt
 can't force the model 100%; the only hard gate is OCR detect-and-regenerate (opt-in, not built yet).
 
+## 2026-07-04 — Callout word choice: a separate gpt-oss pass, favour names + hard numbers
+**Pattern:** Picking the on-screen callout inline while writing the script gave filler and missed proper
+names (e.g. a person's name). A dedicated 2nd pass over the finished beats fixed it — on a real script it
+chose 'Frank "Lucky" Tower', 'Titanic 1912', 'Empress of Ireland', '18 minutes' and rejected filler.
+**Rule:** For "pick the important words" tasks, run a focused post-hoc LLM pass (`CALLOUT_ANALYSIS_
+SYSTEM_PROMPT`) with explicit criteria — prefer PROPER NAMES + hard numbers/dates, reject vague words,
+must appear in the source text (no invention), sparse (~1 in 5). Same pass can flag "intense" beats for
+extra frames. Degrade gracefully (no callouts) if the pass fails.
+**(Art-style note SUPERSEDED 2026-07-04 — see below: the channel moved from ligne claire back to a
+refined stick-figure look for consistency + fewer errors.)**
+
