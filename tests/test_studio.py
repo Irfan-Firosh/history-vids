@@ -45,6 +45,19 @@ def test_styled_prompt_appends_locked_style():
     assert LOCKED_STYLE in out  # every image shares one style → consistency
 
 
+def test_styled_prompt_appends_the_negative_list_on_every_path():
+    from studio.style import NEGATIVE_PROMPT
+
+    # No provider has a negative-prompt field → the negatives ride in the prompt text as "Avoid: …".
+    for kwargs in ({"shot_type": "character"}, {"shot_type": "concept"},
+                   {"use_character_ref": True}):
+        out = styled_prompt("a scene", **kwargs).lower()
+        assert "avoid:" in out
+        for term in ("photorealistic", "vector illustration", "cinematic", "3d"):
+            assert term in out, (kwargs, term)
+    assert NEGATIVE_PROMPT  # constant is populated
+
+
 def test_styled_prompt_is_stable_across_scenes():
     a = styled_prompt("scene one")
     b = styled_prompt("scene two")
