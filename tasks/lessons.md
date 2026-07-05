@@ -129,6 +129,19 @@ found → beat_start (safe). Keep the change in the pure `emphasis_timeline` (th
 downstream (`set_callouts`, dashboard "Planned callouts") picks up the new time for free. Verified:
 "Tsushima" at char 62/70 of a 20s beat → callout at 17.4s (was 0.0s for the whole beat).
 
+## 2026-07-04 — Content-policy 400s need a PROMPT retry (soften), not a backoff retry
+**Correction:** Agnes killed a run with `400 content_policy_violation` ("modify your prompt"). The
+provider only retried 429/5xx/network (backoff) — useless here: re-POSTing the SAME prompt is blocked
+again deterministically. A history channel trips this constantly (death, weapons, blood).
+**Rule:** Detect the content-policy block distinctly (`is_content_policy_error`: 400 + code/message)
+and retry with a **softened prompt**, not a delay: neutralise graphic words → mild symbolic synonyms
+(`soften_prompt`, escalating levels; append "mild, non-graphic, family-friendly, no blood/gore/weapons"),
+then drop them, then a blunt safe framing. Try the original + ~3 softened variants before failing; keep
+the RPM/5xx backoff loop separate (two different retry axes). Deliberately DON'T neuter ordinary words
+(war/battle/attack) — that flattens every video. Raise a typed `ContentPolicyError` (RuntimeError
+subclass) so the render loop's fallback-provider path still catches it. Pure logic in `studio/agnes.py`
+(tested); the side-effecting variant loop in `AgnesImageProvider`.
+
 ## 2026-07-04 — Enforce callout sparsity as a render-time guardrail, not just in the prompt
 **Correction:** "Only ~2-3 callouts per 1.5 min" — but relying on the analysis prompt ("~1 in 5") let
 clusters through. **Rule:** Cap density where the real timeline lives (`emphasis_timeline`, which has the
