@@ -129,6 +129,18 @@ warn to stderr (never silently swallow — surface "skipped N malformed beats"),
 NOTHING usable survives. Default optional top-level fields (`title`) instead of `KeyError`-ing. One bad
 beat in a 45-beat script must not throw away the whole (paid) run. See [[content-hash-cache-pattern]].
 
+## 2026-07-04 — HITL gate: split a long detached pipeline into phases behind the run lock
+**Pattern:** The user wanted human review — generate all images, then assemble ONLY after approval,
+with per-image regenerate. The pipeline was one detached subprocess (research→script→images→assemble).
+**Rule:** To pause a detached pipeline for approval, don't block the process — SPLIT it into phases that
+each run as their own short subprocess behind the existing single-run lock: (1) generate → call
+`rec.pending_approval()` and EXIT (frees the lock, dashboard shows the images); (2) a `/approve`
+endpoint spawns an **assemble-only** pass that reuses the on-disk narration + frames; (3) a `/regenerate`
+endpoint re-draws one scene's frame(s) and stays in `pending_approval`. Critical enabler: a
+`RunRecorder.load()` that RE-OPENS the existing manifest — `create()` resets `run.json`, which would
+wipe the scenes/callouts a follow-up phase must preserve. Verified the gate offline (placeholder + `say`):
+`--review` stops at `pending_approval` with no video; `--assemble-only` then produces it + `completed`.
+
 ## 2026-07-04 — Time an on-screen callout to its SPOKEN moment (estimate, land on/before the word)
 **Correction:** The key-fact PIL callout showed for the WHOLE beat; the user wants it to appear when
 its phrase is actually spoken. We have per-beat Cartesia spans but not per-word times.
