@@ -84,3 +84,12 @@ re-invented a generic stick figure, giving the video no consistent lead.
 ref-less t2i model still draws the same character. Reserve character/wide for the protagonist's real
 moments; concept/map stay people-free to kill filler stickmen.
 
+## 2026-07-04 — All on-screen text is PIL-only; the model is never asked for text
+**Correction:** Agnes sometimes drew garbled text into frames. The user wants a STRICT guardrail: the
+only text on screen comes from the PIL layers (subtitles via make_caption_png + callouts via
+make_emphasis_png), never the diffusion model.
+**Rule:** Keep `NO_TEXT` maximal ("absolutely no text, no words, letters, numbers, signs, labels…") and
+append it on EVERY image-prompt path in `styled_prompt` (character/wide/concept/map + refs + thumbnail)
+— a test asserts this for every shot_type. Never inject callout/fact text into an image_prompt. A prompt
+can't force the model 100%; the only hard gate is OCR detect-and-regenerate (opt-in, not built yet).
+
