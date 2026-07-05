@@ -161,6 +161,20 @@ endpoint re-draws one scene's frame(s) and stays in `pending_approval`. Critical
 wipe the scenes/callouts a follow-up phase must preserve. Verified the gate offline (placeholder + `say`):
 `--review` stops at `pending_approval` with no video; `--assemble-only` then produces it + `completed`.
 
+## 2026-07-05 — Rich subject detail overrides a minimal style; force the constraint for the FOCAL subject
+**Correction:** With a goofy-stickman `LOCKED_STYLE`, undescribed background people rendered as stick
+figures and animals as normal cartoons (both correct) — but the FOCAL human, once described with rich
+cultural detail ("a Viking with long braided hair + fur cloak"), rendered as a DETAILED realistic
+person. The appearance detail out-weighed the minimal style for the subject the model focused on.
+**Rule:** A style string that works for simple subjects can be overpowered when the per-scene subject is
+detailed. Make the constraint explicit and DOMINANT for every subject, and say HOW detail attaches:
+"EVERY person is a stick figure — blank round head + stick body; show culture/era ONLY as simple hair
+and clothing added ON the stick figure (long braided hair on the round head, a fur cloak on the stick
+body); never a detailed/realistic human." That kept Viking/Egyptian/caveman as stick figures WEARING
+accurate cultural hair+dress while animals stayed normal cartoons. Scope selectively: "ONLY humans are
+stick figures; animals, objects and background are normal cartoons (not stick figures)." Verified on
+real Agnes renders (the only way to catch this — the constraint gap is invisible in the prompt text).
+
 ## 2026-07-04 — Ground a style prompt in REAL reference frames; "hand-drawn" ≠ "sketchy scribble"
 **Correction:** The art style read as messy/scribbly. Root cause: the prompt said "wobbly pencil/ink
 textures, irregular sketchy hand-drawn ink outlines" — which pushes a pencil-scribble look. Downloading
