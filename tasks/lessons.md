@@ -104,3 +104,16 @@ extra frames. Degrade gracefully (no callouts) if the pass fails.
 **(Art-style note SUPERSEDED 2026-07-04 — see below: the channel moved from ligne claire back to a
 refined stick-figure look for consistency + fewer errors.)**
 
+## 2026-07-04 — Place on-image text by scanning for whitespace, not a handful of fixed zones
+**Correction:** The callout still landed on the subject sometimes. The old `_pick_callout_zone` scored
+only 5 fixed candidate boxes (top thirds + side margins) and demanded near-white (mean>218); when the
+subject filled those boxes or the "whitespace" was a flat *muted* sky (not near-white), nothing
+qualified and it fell back to a centered default → text over the figure.
+**Rule:** For "put text on the empty part of an image," do a real **flatness scan**: slide the text box
+across the whole usable area (above the subtitle band) and score every position by local variance using
+an **integral image / summed-area table** (O(1) mean+std per window). Flatness (low std) is the primary
+signal — NOT whiteness — so text lands on any uncluttered region (muted sky, plain wall), wherever it
+is in *this* frame. Verify empirically: composite the callout over several real generated frames and
+eyeball it (did it on cave/torch/cave-wall/night-sky samples — all landed on genuine whitespace).
+Keep a std ceiling so a fully-busy frame returns None (caller uses a default spot).
+
