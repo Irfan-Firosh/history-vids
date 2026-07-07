@@ -18,6 +18,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -37,10 +38,16 @@ from studio import (  # noqa: E402
     agnes,
     align_beats_to_words,
     build_transcript,
+    caption_timeline,
     cloudflare,
+    emphasis_timeline,
+    frames_for_span,
     gemini,
     huggingface,
+    image_timeline,
     scene_filter,
+    shot_uses_character,
+    styled_prompt,
 )
 from studio.style import LOCKED_STYLE, PALETTE  # noqa: E402
 
@@ -916,6 +923,21 @@ def build_providers(mode: str) -> ImageProviders:
     return providers_from_roles("placeholder", "placeholder")
 
 
+def attach_script_artifacts(rec: RunRecorder, storyboard_path: Path) -> None:
+    """Copy a generated script's sibling artifacts into the run dir + record them on the manifest."""
+    src_dir = Path(storyboard_path).parent
+    copied: dict[str, Path] = {}
+    for name, key in (("storyboard.json", "script"), ("sources.json", "sources"), ("qc.md", "qc")):
+        p = src_dir / name
+        if p.is_file():
+            dest = rec.dir / name
+            if p.resolve() != dest.resolve():  # skip when resuming from the run's own artifacts
+                shutil.copy(p, dest)
+            copied[key] = dest
+    rec.attach_artifacts(**copied)
+    rec.log(f"attached script artifacts: {', '.join(copied) or 'none'}")
+
+
 def _generate_frame(provider, styled, target, refs, fallback, rec, i, k):
     """Generate one frame; if the primary provider fails (e.g. a Gemini safety refusal on a prompt),
     fall back to a secondary provider so one bad frame never kills a long run."""
@@ -967,3 +989,154 @@ def _record_resume_progress(rec: RunRecorder, frames_per_beat: list[int]) -> Non
                 f"continuing at scene {si + 1} (frame {sk + 1})")
     rec.resumed(note)
     print(f"  ↻ {note}")
+
+
+def _assemble_video(rec, sb, wav, beat_spans, frames_per_beat, callout_overlays, captions):
+    """Step 3, shared by a full render and the approve-time assemble: schedule every frame across the
+    timeline, overlay captions + callouts, mux the continuous narration, and mark the run complete."""
+    segments = [
+        (rec.dir / name, s, e) for name, s, e in image_timeline(beat_spans, frames_per_beat)
+    ]
+    narrations = [s.narration for s in sb.scenes]
+    cues = caption_timeline(beat_spans, narrations) if captions else []
+    # Key-fact callouts (sparse, spacing-capped): each on its beat's first frame's whitespace.
+    overlays = [
+        (text, start, end, rec.dir / f"img_{bi}.png")
+        for text, bi, start, end in callout_overlays
+    ]
+    out = rec.dir / "video.mp4"
+    rec.log("assembling final video…")
+    render_video(segments, wav, cues, out, overlays=overlays)
+    total = ffprobe_duration(out)
+    rec.completed(out, total)
+    print(f"\n✅ {out}  ({total:.1f}s, {W}x{H})")
+    rec.log(f"done → {out.name} ({total:.1f}s, {W}x{H})")
+    return out
+
+
+def assemble_storyboard(rec: RunRecorder, sb, captions: bool = True) -> Path:
+    """Assemble the final video from the narration + frames ALREADY on disk — the "approve" step of
+    the human-in-the-loop review gate. Reconstructs the exact timeline ``render_storyboard`` would
+    have used (same spans, frame counts, callouts) so the result is identical to an un-paused run."""
+    wav = rec.dir / "narration.wav"
+    beat_spans = _load_beat_spans(rec.dir)
+    if not wav.is_file() or beat_spans is None or len(beat_spans) != len(sb.scenes):
+        raise RuntimeError("cannot assemble: missing narration.wav / beat_spans.json for this run")
+    try:
+        frames_per_beat = [
+            frames_for_span(e - s, intense=sb.scenes[i].intense)
+            for i, (s, e) in enumerate(beat_spans)
+        ]
+        callout_overlays = emphasis_timeline(
+            beat_spans, [s.emphasis for s in sb.scenes], [s.narration for s in sb.scenes]
+        )
+        rec.set_callouts([(t, bi, st) for t, bi, st, _e in callout_overlays])
+        rec.log("approved — assembling from reviewed images…")
+        return _assemble_video(rec, sb, wav, beat_spans, frames_per_beat, callout_overlays, captions)
+    except Exception as exc:
+        rec.failed(exc)
+        print(f"\n❌ assemble failed: {exc}", file=sys.stderr)
+        raise
+
+
+def render_storyboard(
+    rec: RunRecorder, sb, images: ImageProviders, voice, captions: bool = True,
+    resume: bool = False, fallback=None, pause_for_review: bool = False,
+) -> Path | None:
+    """Render `sb` into `rec.dir` and return the final video path.
+
+    One continuous narration (`build_narration`) → real per-beat spans → each beat gets one or more
+    **freshly generated** frames, each held ≥ ``MIN_FRAME_HOLD`` seconds (long beats split into that
+    many distinct frames) → the whole thing assembled in a single pass (`render_video`). Images are
+    text-free; a beat's optional `emphasis` fact is drawn as a Schoolbell callout on the frame's
+    whitespace (post overlay, not by the model); there are no cutaway frames.
+    Per-role providers: `character` renders character/wide (reference-conditioned), `concept` renders
+    concept/map. `resume` skips frames whose image already exists on disk (reuse a partial run);
+    `fallback` is a secondary provider used when the primary refuses/fails a frame. Shared by the CLI
+    (`main`) and the dashboard's `run_pipeline`; records failure + re-raises.
+    """
+    channel_refs = load_channel_refs() if images.character.name in REF_CAPABLE else []
+    if images.character.name in REF_CAPABLE and not channel_refs:
+        msg = "no assets/refs/ found — run tools/make_refs.py first for character consistency."
+        print(f"  ⚠ {msg}")
+        rec.log(f"WARN: {msg}")
+    try:
+        # 1) Whole-script narration → one continuous wav + a real (start,end) span per beat. On a
+        # resume, reuse the saved narration.wav + spans so timings stay identical to the frames
+        # already on disk (no audio drift, no wasted TTS) instead of re-synthesising.
+        wav = rec.dir / "narration.wav"
+        saved_spans = _load_beat_spans(rec.dir) if resume else None
+        if resume and wav.is_file() and saved_spans is not None and len(saved_spans) == len(sb.scenes):
+            beat_spans = saved_spans
+            rec.log(f"resume: reusing existing narration.wav + spans "
+                    f"({len(beat_spans)} beats, no TTS)")
+        else:
+            rec.log(f"synthesising continuous narration ({voice.name})…")
+            wav, beat_spans = build_narration(sb.scenes, voice, rec.dir)
+            _save_beat_spans(rec.dir, beat_spans)
+        total_audio = beat_spans[-1][1] if beat_spans else 0.0
+        rec.log(f"narration {total_audio:.1f}s · {len(beat_spans)} beats")
+
+        # 2) Per beat: split its span into ≥8s holds and generate that many DISTINCT fresh frames
+        # (an `intense` beat gets one extra frame for more punch, capped in frames_for_span).
+        frames_per_beat = [
+            frames_for_span(e - s, intense=sb.scenes[i].intense)
+            for i, (s, e) in enumerate(beat_spans)
+        ]
+        if resume:
+            _record_resume_progress(rec, frames_per_beat)
+
+        # Sparse key-fact callouts: the analysis pass proposes candidates on scenes; the spacing cap
+        # is enforced HERE (once) so the recorded plan, the per-scene badges, and what actually
+        # renders all match. Each surviving callout is drawn on its beat's first frame's whitespace.
+        callout_overlays = emphasis_timeline(
+            beat_spans, [s.emphasis for s in sb.scenes], [s.narration for s in sb.scenes]
+        )
+        kept_callouts = {bi: text for text, bi, _s, _e in callout_overlays}
+        rec.set_callouts([(text, bi, start) for text, bi, start, _e in callout_overlays])
+
+        for i, sc in enumerate(sb.scenes):
+            start, end = beat_spans[i]
+            dur = end - start
+            is_char = shot_uses_character(sc.shot_type)
+            provider = images.character if is_char else images.concept
+            refs = channel_refs if is_char else []
+            rec.scene_started(
+                i, sc.shot_type, sc.image_prompt,
+                ref_count=len(refs), narration=sc.narration, cite=sc.cite,
+                emphasis=kept_callouts.get(i, ""),  # only badge callouts that survive the spacing cap
+                intense=sc.intense,
+                frame_count=frames_per_beat[i],  # >1 → a fire spot; dashboard shows both frames
+            )
+            styled = styled_prompt(
+                sc.image_prompt, sb.style, use_character_ref=bool(refs), shot_type=sc.shot_type
+            )
+            n = frames_per_beat[i]
+            rec.log(f"scene {i}: {sc.shot_type} · {dur:.1f}s · {n} fresh frame(s) ({provider.name})")
+            for k in range(n):  # each frame is its own fresh generation (no reuse/repeat)
+                target = rec.dir / _frame_name(i, k)
+                if resume and target.is_file():  # reuse frames from a partial run
+                    continue
+                # extra frames of the same beat are a clearly different shot (see _frame_prompt) so
+                # the on-screen switch reads as a real cut, not a near-duplicate.
+                _generate_frame(provider, _frame_prompt(styled, k), target, refs, fallback, rec, i, k)
+            rec.scene_image(i, rec.dir / f"img_{i}.png")
+            rec.scene_narration(i, dur)
+            rec.scene_rendered(i, rec.dir / f"img_{i}.png")
+            print(f"  scene {i}: {sc.shot_type:9} {dur:4.1f}s  {n}img  “{sc.narration[:38]}…”")
+
+        # 3) Human-in-the-loop gate: with review on, stop here — all images exist, but NOTHING is
+        # assembled until the user approves in the dashboard (they can regenerate any image first).
+        if pause_for_review:
+            rec.pending_approval()
+            rec.log("all images generated — awaiting your review/approval before assembling")
+            print("\n⏸  images ready — review them in the dashboard, then Approve to assemble")
+            return None
+        # Otherwise assemble the whole video under the continuous audio right away.
+        return _assemble_video(
+            rec, sb, wav, beat_spans, frames_per_beat, callout_overlays, captions
+        )
+    except Exception as exc:  # record the failure into the manifest, then re-raise for the exit code
+        rec.failed(exc)
+        print(f"\n❌ run {rec.run_id} failed: {exc}", file=sys.stderr)
+        raise
