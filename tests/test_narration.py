@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from studio.narration import (
     align_beats,
+    align_beats_to_words,
     build_transcript,
     caption_timeline,
     emphasis_timeline,
@@ -47,6 +48,41 @@ def test_align_beats_is_word_count_independent_and_covers_the_timeline():
 def test_align_beats_handles_empty_and_degenerate():
     assert align_beats([], [], []) == []
     assert align_beats([1, 1], [], []) == [(0.0, 0.0), (0.0, 0.0)]  # no audio → no time
+
+
+# ── align_beats_to_words (the accurate, word-anchored path) ───────────────────
+def test_align_beats_to_words_anchors_each_cut_to_the_real_word_end():
+    # Two beats; the first beat's text ("hello there") ends at the 2nd spoken word (end 1.9s),
+    # so the cut must land at 1.9 — NOT a character-proportional estimate.
+    narrs = ["hello there", "friend of mine"]
+    words = ["hello", "there", "friend", "of", "mine"]
+    starts = [0.0, 1.0, 2.2, 3.0, 3.6]
+    ends = [0.9, 1.9, 2.9, 3.5, 4.4]
+    assert align_beats_to_words(narrs, words, starts, ends) == [(0.0, 1.9), (1.9, 4.4)]
+
+
+def test_align_beats_to_words_survives_number_expansion():
+    # Beat text says "35,000" (a short token) but the TTS speaks three words. The matcher must not
+    # let the first beat starve the second — each beat keeps at least one word and stays monotonic.
+    narrs = ["we found 35,000", "bones here"]
+    words = ["we", "found", "thirty", "five", "thousand", "bones", "here"]
+    starts = [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 3.6]
+    ends = [0.4, 0.9, 1.4, 1.9, 2.6, 3.5, 4.2]
+    spans = align_beats_to_words(narrs, words, starts, ends)
+    assert len(spans) == 2
+    assert spans[0][0] == 0.0 and spans[-1][1] == 4.2  # covers [0, total]
+    assert spans[0][1] == spans[1][0]  # contiguous
+    assert 0.0 < spans[0][1] < 4.2     # first beat took real time, didn't eat everything
+
+
+def test_align_beats_to_words_falls_back_without_word_text():
+    # No spoken-word text (e.g. an offline voice) → proportional align_beats, still valid.
+    spans = align_beats_to_words(["aaaa", "bb"], [], [0.0], [6.0])
+    assert spans and spans[0][0] == 0.0 and spans[-1][1] == 6.0
+
+
+def test_align_beats_to_words_handles_empty():
+    assert align_beats_to_words([], [], [], []) == []
 
 
 # ── frames_for_span / image_timeline ─────────────────────────────────────────
