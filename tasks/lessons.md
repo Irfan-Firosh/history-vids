@@ -278,3 +278,16 @@ fallback for voices with no word text (offline `say`). Don't throw away signal y
 **Verify tip:** to quantify alignment drift without a full render, replay ONE Cartesia call, cache the
 word arrays to disk, and diff algorithm-boundaries vs word-anchored "truth" offline (free iteration).
 
+## 2026-07-07 — "UI change not showing" = the dashboard server cached HTML at import
+**Bug (user):** "I still can't see all the images for the fire/hotspots." The code + data were correct
+(run.json had frame_count=2 on the intense beats, img_i_1.png existed on disk, the API returned it, the
+sceneCard JS rendered both frames). The real cause: `dashboard/app.py` read `INDEX_HTML =
+Path(...).read_text()` ONCE at import, so the long-running uvicorn process (started ~2h before the
+fire-spot frontend was written) kept serving the STALE index.html — the served HTML had 0 occurrences
+of `frame_count`. A restart would "fix" it, masking the footgun.
+**Rule:** For a local dev dashboard, DON'T cache templates at import — read the HTML fresh per request
+(`INDEX_HTML_PATH.read_text()` inside the route). The file is tiny; the per-request read is free and
+edits show up with no restart. When a user says "my UI change isn't showing," first check whether a
+server process predates the file edit (`ps -o lstart` vs file mtime) and diff the SERVED bytes
+(`curl / | grep token`) against disk before hunting for a logic bug. Verify the data path end-to-end
+(disk → API JSON → rendered DOM) rather than re-reading the component.
