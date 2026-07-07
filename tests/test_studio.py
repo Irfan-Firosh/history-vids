@@ -80,6 +80,21 @@ def test_styled_prompt_is_stable_across_scenes():
     assert a.removeprefix("scene one") == b.removeprefix("scene two")  # identical style tail
 
 
+def test_thumbnail_prompt_is_completely_the_stickman_style_composed_as_a_thumbnail():
+    from studio.style import LOCKED_STYLE, thumbnail_prompt
+    out = thumbnail_prompt("a lone figure at a grave")
+    assert out.startswith("a lone figure at a grave")
+    low = out.lower()
+    assert "no text" in low and "16:9" in low  # title is PIL-added; still text-free + 16:9
+    # COMPLETELY stickman: the FULL video style, the stick-figure guard, AND the Avoid: negatives
+    # (so no photoreal / 3D / cinematic background) — same look as the frames.
+    assert LOCKED_STYLE in out
+    assert "stick figure" in low and "no realistic" in low
+    assert "avoid:" in low and "photorealistic" in low
+    # …only the COMPOSITION is thumbnail-specific (large focal subject + empty title space).
+    assert "thumbnail" in low and "empty space for title text" in low
+
+
 def test_styled_prompt_concept_map_forbids_people_and_drops_character_style():
     # The bug: concept/map shots used LOCKED_STYLE ("stick-figure characters") → drew people.
     out = styled_prompt("a flat world map", shot_type="map")
@@ -92,6 +107,16 @@ def test_styled_prompt_character_ref_locks_to_one_reference_figure():
     assert "reference image" in out and "Exactly one white-headed stick person" in out
     wide = styled_prompt("three people walking in snow", use_character_ref=True, shot_type="wide")
     assert "small simple group of white-headed stick people" in wide
+
+
+def test_every_image_prompt_forbids_model_drawn_text():
+    # Strict guardrail: ALL on-screen text is PIL (subtitles + callouts), never drawn by the model.
+    from studio import thumbnail_prompt
+
+    for st in ("character", "wide", "concept", "map"):
+        assert "no text" in styled_prompt("a scene", shot_type=st).lower()
+    assert "no text" in styled_prompt("a scene", use_character_ref=True).lower()  # ref path
+    assert "no text" in thumbnail_prompt("a lone figure").lower()  # thumbnail title is PIL-added
 
 
 def test_character_shots_force_stick_figures_and_concept_shots_are_people_free():

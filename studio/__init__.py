@@ -24,7 +24,7 @@ from studio.narration import (
 from studio.research import ResearchProvider, ResearchSource, format_research_brief
 from studio.run_log import RunManifest, RunRecorder, SceneRecord, new_run_id
 from studio.storyboard import DEMO_STORYBOARD, storyboard_from_dict
-from studio.style import CONCEPT_STYLE, LOCKED_STYLE, styled_prompt
+from studio.style import CONCEPT_STYLE, LOCKED_STYLE, styled_prompt, thumbnail_prompt
 from studio.types import (
     SHOT_TYPES,
     ImageProvider,
@@ -45,6 +45,7 @@ __all__ = [
     "LOCKED_STYLE",
     "CONCEPT_STYLE",
     "styled_prompt",
+    "thumbnail_prompt",
     "MOTIONS",
     "scene_filter",
     "split_caption_cues",
