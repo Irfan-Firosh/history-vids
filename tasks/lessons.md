@@ -161,6 +161,21 @@ endpoint re-draws one scene's frame(s) and stays in `pending_approval`. Critical
 wipe the scenes/callouts a follow-up phase must preserve. Verified the gate offline (placeholder + `say`):
 `--review` stops at `pending_approval` with no video; `--assemble-only` then produces it + `completed`.
 
+## 2026-07-06 — Two-sided style scoping (people-free concepts / stickman humans) + a real model limit
+**Correction:** Stickmen were leaking into concept shots, and some humans still rendered detailed.
+Fixes that WORKED (verified on real Agnes frames): (1) concept/map — lead with "empty scene, objects &
+scenery only, NO people/stick figures" + a hardened `NO_PEOPLE` negative; (2) character/wide — add an
+explicit `NO_REALISTIC_HUMANS` negative incl. anti-photorealism ("flat 2D cartoon, NOT a photo/3D").
+Crowds now render ALL stickmen; normal characters (toga, fur, braids) stay stickmen.
+**Rule + honest limit:** Prompt guards can't fully beat a strong subject. (a) Leading a character prompt
+with a long "draw as a stick figure" PREAMBLE backfired — an ornate subject ("golden-armored emperor")
+went PHOTOREALISTIC with a circle head. Keep character prompts subject-first + trailing negatives; add
+an explicit no-photo clause. (b) Ornate/ARMORED focal subjects (breastplate, throne) resist stick-figure
+rendering in Agnes t2i no matter the prompt — a genuine model limitation. The real lever is the SCRIPT:
+instruct it to describe appearance with ONE-TWO SIMPLE markers, "never ornate/detailed," because an
+over-described outfit makes the model draw a realistic person. Residual bad frames → the HITL regenerate
+gate. Don't burn many API renders chasing one pathological subject once the common cases are solid.
+
 ## 2026-07-05 — Rich subject detail overrides a minimal style; force the constraint for the FOCAL subject
 **Correction:** With a goofy-stickman `LOCKED_STYLE`, undescribed background people rendered as stick
 figures and animals as normal cartoons (both correct) — but the FOCAL human, once described with rich
