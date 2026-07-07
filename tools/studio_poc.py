@@ -35,6 +35,8 @@ sys.path.insert(0, str(_ROOT))
 from studio import (  # noqa: E402
     RunRecorder,
     agnes,
+    align_beats_to_words,
+    build_transcript,
     cloudflare,
     gemini,
     huggingface,
@@ -803,6 +805,36 @@ def concat_audio(wavs: list[Path], out: Path) -> None:
 def load_channel_refs() -> list[Path]:
     """The committed character references passed on character/wide shots (if present)."""
     return [p for p in (REFS_DIR / "character.png", REFS_DIR / "expressions.png") if p.exists()]
+
+
+def build_narration(scenes, voice, out_dir: Path) -> tuple[Path, list[tuple[float, float]]]:
+    """Synthesize the whole script and return ``(continuous_wav, per-beat (start,end) spans)``.
+
+    Cartesia → one SSE request with word timestamps → spans snapped to real speech pauses. Any other
+    voice (e.g. macOS ``say``, offline) → synth each beat, concat into one wav, spans = cumulative
+    per-beat durations. Either way the assembler gets a single continuous audio + one span per beat.
+    """
+    narrations = [s.narration for s in scenes]
+    wav = out_dir / "narration.wav"
+    if voice.name == "cartesia":
+        transcript = build_transcript(narrations)
+        words, starts, ends = CartesiaTimestampVoice().synthesize(transcript, wav)
+        # Anchor each beat to the REAL spoken word where its text ends (accurate; the old
+        # character-proportional align_beats drifted up to ~3.5s mid-video).
+        return wav, align_beats_to_words(narrations, words, starts, ends)
+
+    per_beat: list[Path] = []
+    spans: list[tuple[float, float]] = []
+    t = 0.0
+    for i, text in enumerate(narrations):
+        w = out_dir / f"narr_{i}.wav"
+        voice.synthesize(text, w)
+        dur = ffprobe_duration(w)
+        spans.append((round(t, 3), round(t + dur, 3)))
+        t += dur
+        per_beat.append(w)
+    concat_audio(per_beat, wav)
+    return wav, spans
 
 
 BEAT_SPANS_NAME = "beat_spans.json"
