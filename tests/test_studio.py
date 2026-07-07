@@ -95,6 +95,27 @@ def test_thumbnail_prompt_is_completely_the_stickman_style_composed_as_a_thumbna
     assert "thumbnail" in low and "empty space for title text" in low
 
 
+def test_thumbnail_overlay_uses_pale_hand_drawn_card(tmp_path):
+    import io
+
+    from PIL import Image
+
+    from tools.make_thumbnail import overlay_title
+
+    src = Image.new("RGB", (1280, 720), (180, 220, 255))
+    buf = io.BytesIO()
+    src.save(buf, format="PNG")
+    out = tmp_path / "thumb.png"
+
+    overlay_title(buf.getvalue(), "WHAT CHANGED", out)
+
+    im = Image.open(out).convert("RGB")
+    assert im.size == (1280, 720)
+    # Right-side title region should be a pale paper card, not the old dark gradient scrim.
+    r, g, b = im.getpixel((650, 120))
+    assert r > 220 and g > 210 and b > 180
+
+
 def test_styled_prompt_concept_map_forbids_people_and_drops_character_style():
     # The bug: concept/map shots used LOCKED_STYLE ("stick-figure characters") → drew people.
     out = styled_prompt("a flat world map", shot_type="map")
