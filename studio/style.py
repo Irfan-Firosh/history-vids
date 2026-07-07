@@ -85,6 +85,34 @@ def _avoid() -> str:
     """The trailing ``Avoid: …`` clause carrying :data:`NEGATIVE_PROMPT` (on every prompt path)."""
     return f"Avoid: {NEGATIVE_PROMPT}."
 
+
+#: Thumbnail styling: COMPLETELY the same hand-drawn stickman look as the video (LOCKED_STYLE +
+#: NO_REALISTIC_HUMANS + the Avoid: negatives, so no photoreal / 3D / cinematic background sneaks
+#: in) — only the COMPOSITION changes: one big centred focal stick figure, an exaggerated intense
+#: expression, bold high-contrast readable layout. This layer carries composition ONLY (no
+#: cinematic/vibrant/polished words — those pulled the earlier render into a realistic scene). Title
+#: text is added in post (PIL).
+THUMBNAIL_STYLE = (
+    "Composed as a bold YouTube history thumbnail while keeping the same crude marker-cartoon "
+    "look: ONE large white-headed stick-person or one large simple prop, big surprised or intense "
+    "dot-eye expression, one or two oversized clear props, plain flat background, strong readable "
+    "silhouette, left-side focal subject with empty space for title text"
+)
+
+
+def thumbnail_prompt(subject: str) -> str:
+    """Prompt for a text-free thumbnail image (the title is overlaid later with PIL).
+
+    COMPLETELY the stickman look: the full video :data:`LOCKED_STYLE` + :data:`NO_REALISTIC_HUMANS`
+    + the ``Avoid:`` negatives (so no photoreal / 3D / cinematic background) — with
+    :data:`THUMBNAIL_STYLE` adding only the punchy thumbnail COMPOSITION on top. Only ``NO_TEXT``
+    also rides along (the title is added in post via PIL)."""
+    subject = subject.strip().rstrip(".")
+    return (
+        f"{subject}. {LOCKED_STYLE}. {THUMBNAIL_STYLE}. {NO_REALISTIC_HUMANS}. "
+        f"{FRAME}, {NO_TEXT}. {_avoid()}"
+    )
+
 #: Kept for any seed-based provider. Gemini uses reference conditioning (assets/refs/), not seeds.
 STYLE_SEED = 770077
 

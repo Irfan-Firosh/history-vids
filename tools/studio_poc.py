@@ -1039,6 +1039,48 @@ def assemble_storyboard(rec: RunRecorder, sb, captions: bool = True) -> Path:
         raise
 
 
+def _thumbnail_subject(sb, override: str | None = None) -> str:
+    """Pick a striking focal subject for the thumbnail: an explicit override, else the first intense
+    character/wide scene, else the first character/wide scene, else the title."""
+    if override and override.strip():
+        return override.strip()
+    char_scenes = [s for s in sb.scenes if shot_uses_character(s.shot_type)]
+    for s in char_scenes:
+        if s.intense:
+            return s.image_prompt
+    if char_scenes:
+        return char_scenes[0].image_prompt
+    return sb.title
+
+
+def generate_thumbnail(
+    rec: RunRecorder, sb, provider, text: str | None = None, subject: str | None = None
+) -> Path:
+    """Generate a YouTube thumbnail for the run: a text-free focal image (channel style, via the
+    given image provider) + a big PIL title overlaid on the right. Records it on the manifest so the
+    dashboard can show it. Title defaults to the run title; subject to a striking scene."""
+    from studio.style import thumbnail_prompt
+    from tools.make_thumbnail import overlay_title  # lazy: make_thumbnail imports this module
+
+    title = (text or sb.title or "").strip() or "UNTITLED"
+    subj = _thumbnail_subject(sb, subject)
+    out = rec.dir / "thumbnail.png"
+    raw = rec.dir / "thumbnail.raw.png"
+    rec.log(f"generating thumbnail ({provider.name}) · text={title[:40]!r}")
+    try:
+        provider.generate(thumbnail_prompt(subj), raw, ())
+        overlay_title(raw.read_bytes(), title, out)
+        raw.unlink(missing_ok=True)
+        rec.set_thumbnail(out)
+        rec.log(f"thumbnail → {out.name}")
+        print(f"🖼  {out}")
+        return out
+    except Exception as exc:
+        rec.log(f"thumbnail failed: {exc}")
+        print(f"\n❌ thumbnail failed: {exc}", file=sys.stderr)
+        raise
+
+
 def render_storyboard(
     rec: RunRecorder, sb, images: ImageProviders, voice, captions: bool = True,
     resume: bool = False, fallback=None, pause_for_review: bool = False,

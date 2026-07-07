@@ -85,6 +85,13 @@ class ApproveRequest(BaseModel):
     captions: bool = True
 
 
+class ThumbnailRequest(BaseModel):
+    """Thumbnail payload — big title words + optional focal subject (both default from the run)."""
+
+    text: str | None = None
+    subject: str | None = None
+
+
 # ── helpers ───────────────────────────────────────────────────────────────────
 def _run_dir(run_id: str) -> Path:
     """Resolve a run dir, rejecting any id that escapes RUNS_DIR (path-traversal guard)."""
@@ -164,6 +171,14 @@ def _approval_state(run_dir: Path, run_id: str, manifest: dict) -> dict:
     }
 
 
+def _thumbnail_state(run_dir: Path, run_id: str, manifest: dict) -> dict:
+    """Whether a thumbnail can be generated for this run (it has generated images) + job status."""
+    return {
+        "available": (run_dir / "img_0.png").is_file(),
+        "running": _is_active(run_id, "thumbnail"),
+    }
+
+
 # ── routes ────────────────────────────────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse)
 def index() -> str:
@@ -205,6 +220,19 @@ def list_runs() -> JSONResponse:
             )
     summaries.sort(key=lambda s: s["run_id"], reverse=True)
     return JSONResponse(summaries)
+
+
+@app.get("/api/runs/{run_id}")
+def get_run(run_id: str) -> JSONResponse:
+    run_dir = _run_dir(run_id)
+    manifest = _read_manifest(run_dir)
+    if manifest is None:
+        raise HTTPException(status_code=404, detail="manifest not ready")
+    manifest["reedit"] = _reedit_state(run_dir, run_id, manifest)  # drives the Re-edit control
+    manifest["resume"] = _resume_state(run_dir, run_id, manifest)  # drives the Resume control
+    manifest["approval"] = _approval_state(run_dir, run_id, manifest)  # drives the Approve UI
+    manifest["thumbnail"] = _thumbnail_state(run_dir, run_id, manifest)  # drives the Thumbnail UI
+    return JSONResponse(manifest)
 
 
 @app.get("/api/runs/{run_id}/log", response_class=PlainTextResponse)
@@ -366,6 +394,15 @@ def resume_run(run_id: str, req: ResumeRequest) -> dict[str, object]:
     return {"run_id": run_id, "resuming": True, "captions": req.captions}
 
 
+def _image_provider_flags(provider: str) -> tuple[list[str], str]:
+    """Reconstruct the CLI image-provider flags from a manifest's ``images_provider`` label, plus
+    the character provider name (to pick a distinct fallback). E.g. ``gemini/agnes`` → per-role."""
+    if "/" in provider:
+        char, concept = (provider.split("/") + [provider])[:2]
+        return ["--char-model", char, "--concept-model", concept], char
+    return ["--images", provider], provider
+
+
 @app.post("/api/runs/{run_id}/approve", status_code=202)
 def approve_run(run_id: str, req: ApproveRequest) -> dict[str, object]:
     """Approve a reviewed run: assemble the final video from the images + narration already on disk.
@@ -399,3 +436,39 @@ def approve_run(run_id: str, req: ApproveRequest) -> dict[str, object]:
         log.close()
         _active.update(run_id=run_id, proc=proc, mode="assemble")
     return {"run_id": run_id, "assembling": True}
+
+
+@app.post("/api/runs/{run_id}/thumbnail", status_code=202)
+def generate_thumbnail(run_id: str, req: ThumbnailRequest) -> dict[str, object]:
+    """Generate a YouTube thumbnail for a run: a focal image (the run's provider) + a big PIL title
+    overlay. Title defaults to the run's title; both title and focal subject can be overridden."""
+    run_dir = _run_dir(run_id)  # 404 + traversal-guarded
+    manifest = _read_manifest(run_dir) or {}
+    provider = str(manifest.get("images_provider") or "agnes")
+    provider_flags, _char = _image_provider_flags(provider)
+    text = (req.text or manifest.get("title") or "").strip()
+
+    with _lock:
+        proc = _active["proc"]
+        if proc is not None and proc.poll() is None:
+            raise HTTPException(
+                status_code=409, detail=f"run {_active['run_id']} still in progress"
+            )
+        cmd = [
+            sys.executable, str(POC_SCRIPT),
+            "--thumbnail", "--run-id", run_id, "--voice", "say", *provider_flags,
+        ]
+        storyboard = run_dir / "storyboard.json"
+        if storyboard.is_file():  # gives the thumbnail the real title + scenes for the subject
+            cmd += ["--storyboard", str(storyboard)]
+        if text:
+            cmd += ["--thumb-text", text]
+        if req.subject:
+            cmd += ["--thumb-subject", req.subject]
+        log = (run_dir / "thumbnail.log").open("w", encoding="utf-8")
+        proc = subprocess.Popen(
+            cmd, cwd=str(REPO_ROOT), stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
+        )
+        log.close()
+        _active.update(run_id=run_id, proc=proc, mode="thumbnail")
+    return {"run_id": run_id, "generating_thumbnail": True}
