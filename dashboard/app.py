@@ -10,6 +10,7 @@ Run it:  uv run uvicorn dashboard.app:app --reload  →  http://127.0.0.1:8000
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -27,6 +28,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 RUNS_DIR = REPO_ROOT / "result/axen/poc/runs"
 POC_SCRIPT = REPO_ROOT / "tools/studio_poc.py"
 PIPELINE_SCRIPT = REPO_ROOT / "tools/run_pipeline.py"  # topic → script → render (whole pipeline)
+REASSEMBLE_SCRIPT = REPO_ROOT / "tools/reassemble.py"  # re-edit: fresh Cartesia TTS + retimed cuts
+REEDIT_VIDEO = "video_v2.mp4"  # reassemble output (kept beside the original video.mp4)
 INDEX_HTML_PATH = Path(__file__).parent / "index.html"
 NEW_RUN_HTML_PATH = Path(__file__).parent / "new_run.html"
 
@@ -64,6 +67,12 @@ class RunRequest(BaseModel):
     review: bool = True
 
 
+class ReassembleRequest(BaseModel):
+    """Re-edit payload — only the Cartesia narration speed is tunable (images are reused as-is)."""
+
+    speed: float = 0.88  # Cartesia generation_config.speed, clamped to [0.6, 1.5]
+
+
 class ResumeRequest(BaseModel):
     """Resume payload — reuse frames on disk; subtitles can be toggled on the resume."""
 
@@ -97,6 +106,24 @@ def _is_active(run_id: str, mode: str | None = None) -> bool:
         if proc is None or proc.poll() is not None or _active["run_id"] != run_id:
             return False
         return mode is None or _active.get("mode") == mode
+
+
+def _reedit_state(run_dir: Path, run_id: str, manifest: dict) -> dict:
+    """Whether this run CAN be re-edited (has a saved storyboard + images), and the re-edit output.
+
+    A re-edit reruns only the Cartesia TTS + retimed assembly on the images already on disk, so it
+    needs a ``storyboard.json`` (the narration) and at least the first image. Demo runs lack these.
+    Hidden while a run is awaiting review approval (Approve is the action there, not Re-edit).
+    """
+    return {
+        "available": (
+            (run_dir / "storyboard.json").is_file()
+            and (run_dir / "img_0.png").is_file()
+            and manifest.get("status") != "pending_approval"
+        ),
+        "video": REEDIT_VIDEO if (run_dir / REEDIT_VIDEO).is_file() else None,
+        "running": _is_active(run_id, "reassemble"),
+    }
 
 
 def _resume_state(run_dir: Path, run_id: str, manifest: dict) -> dict:
@@ -233,6 +260,43 @@ def _spawn_run(req: RunRequest) -> str:
 def trigger_run(req: RunRequest) -> dict[str, str]:
     """Spawn a pipeline run in the background; return its run_id to poll. 409 if one is live."""
     return {"run_id": _spawn_run(req)}
+
+
+@app.post("/api/runs/{run_id}/reassemble", status_code=202)
+def reassemble_run(run_id: str, req: ReassembleRequest) -> dict[str, object]:
+    """Re-edit a saved run: fresh Cartesia TTS + retimed image/caption cuts, reusing its images.
+
+    Regenerates NO images — only a new narration + assembly → ``video_v2.mp4`` in the run dir.
+    Serialised behind the same single-run lock as a full run; progress lands in ``reassemble.log``.
+    """
+    run_dir = _run_dir(run_id)  # 404 + traversal-guarded
+    storyboard = run_dir / "storyboard.json"
+    if not storyboard.is_file() or not (run_dir / "img_0.png").is_file():
+        raise HTTPException(
+            status_code=400, detail="run has no saved storyboard + images to re-edit"
+        )
+    speed = max(0.6, min(1.5, req.speed))
+
+    with _lock:
+        proc = _active["proc"]
+        if proc is not None and proc.poll() is None:
+            raise HTTPException(
+                status_code=409, detail=f"run {_active['run_id']} still in progress"
+            )
+        cmd = [
+            sys.executable, str(REASSEMBLE_SCRIPT),
+            "--storyboard", str(storyboard),
+            "--images-dir", str(run_dir),
+            "--out", str(run_dir / REEDIT_VIDEO),
+        ]
+        log = (run_dir / "reassemble.log").open("w", encoding="utf-8")
+        proc = subprocess.Popen(
+            cmd, cwd=str(REPO_ROOT), stdout=log, stderr=subprocess.STDOUT,
+            env={**os.environ, "CARTESIA_SPEED": str(speed)}, start_new_session=True,
+        )
+        log.close()  # the child holds its own dup of the fd
+        _active.update(run_id=run_id, proc=proc, mode="reassemble")
+    return {"run_id": run_id, "reassembling": True, "speed": speed}
 
 
 @app.post("/api/runs/{run_id}/resume", status_code=202)

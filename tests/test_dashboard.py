@@ -137,6 +137,11 @@ def test_delete_traversal_blocked(client):
     assert client.request("DELETE", "/api/runs/..%2f..%2fetc").status_code == 404
 
 
+def test_reedit_rejected_without_storyboard(client):
+    r = client.post("/api/runs/20260101-000000/reassemble", json={"speed": 0.9})
+    assert r.status_code == 400
+
+
 # ── resume (pick up a stopped/failed run, reusing frames on disk) ──────────────
 def _mark_failed_with_storyboard(run_dir, images_provider="gemini/agnes"):
     m = json.loads((run_dir / "run.json").read_text())
