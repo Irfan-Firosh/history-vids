@@ -129,6 +129,53 @@ def test_invalid_provider_rejected(client):
     assert client.post("/api/runs", json={"images": "dalle"}).status_code == 422
 
 
+# ── review gate (HITL: pause after images → approve to assemble / regenerate one image) ──
+def _mark_pending_approval(run_dir, images_provider="gemini/agnes"):
+    m = json.loads((run_dir / "run.json").read_text())
+    m["status"] = "pending_approval"
+    m["images_provider"] = images_provider
+    (run_dir / "run.json").write_text(json.dumps(m))
+    (run_dir / "storyboard.json").write_text('{"title": "t", "scenes": []}')
+
+
+def test_topic_run_pauses_for_review_by_default(client, monkeypatch):
+    captured: dict = {}
+
+    class FakeProc:
+        def poll(self):
+            return None
+
+    def fake_popen(cmd, *a, **k):
+        captured["cmd"] = cmd
+        return FakeProc()
+
+    monkeypatch.setattr(dash.subprocess, "Popen", fake_popen)
+    r = client.post("/api/runs", json={"topic": "Battle of Tsushima", "images": "agnes"})
+    assert r.status_code == 201
+    assert "--review" in captured["cmd"]  # topic runs pause for approval by default
+
+
+def test_demo_run_does_not_pause_for_review(client, monkeypatch):
+    captured: dict = {}
+
+    class FakeProc:
+        def poll(self):
+            return None
+
+    def fake_popen(cmd, *a, **k):
+        captured["cmd"] = cmd
+        return FakeProc()
+
+    monkeypatch.setattr(dash.subprocess, "Popen", fake_popen)
+    client.post("/api/runs", json={"images": "placeholder"})  # no topic → canned demo
+    assert "--review" not in captured["cmd"]
+
+
+def test_approve_rejected_when_not_pending(client):
+    # the fixture run is completed → not awaiting approval
+    assert client.post("/api/runs/20260101-000000/approve", json={}).status_code == 400
+
+
 def test_delete_missing_run_is_404(client):
     assert client.request("DELETE", "/api/runs/nope").status_code == 404
 

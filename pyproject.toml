@@ -37,4 +37,5 @@ select = ["E", "F", "I", "UP", "B"]
 "tools/studio_poc.py" = ["E402", "E501"]   # sys.path bootstrap; long provider strings/docstrings
 "tools/make_refs.py" = ["E402", "E501"]    # sys.path bootstrap; long reference prompts
 "tools/make_script.py" = ["E402", "E501"]  # sys.path bootstrap; long provider strings/docstrings
+"tools/run_pipeline.py" = ["E402", "E501"]  # sys.path bootstrap; orchestrator imports after path
 "tools/reassemble.py" = ["E402", "E501"]   # sys.path bootstrap; long provider strings/docstrings
