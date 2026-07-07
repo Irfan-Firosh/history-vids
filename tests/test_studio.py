@@ -501,6 +501,19 @@ def test_set_callouts_records_the_flashed_plan(tmp_path):
     ]
 
 
+# ── review gate (HITL: pause before assembly, load existing run, regenerate one scene) ──
+def test_set_thumbnail_records_path(tmp_path):
+    import json
+
+    from studio.run_log import RunRecorder
+
+    rec = RunRecorder.create(
+        tmp_path, title="t", images_provider="agnes", voice_provider="say", scene_count=1,
+    )
+    rec.set_thumbnail(rec.dir / "thumbnail.png")
+    assert json.loads((rec.dir / "run.json").read_text())["thumbnail_path"] == "thumbnail.png"
+
+
 def test_run_recorder_load_preserves_existing_manifest(tmp_path):
     # approve/regenerate run as separate processes → they must re-open, not reset, the manifest.
     from studio.run_log import RunRecorder
