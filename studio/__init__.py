@@ -14,6 +14,7 @@ from studio.captions import cue_timings, split_caption_cues
 from studio.kenburns import MOTIONS, scene_filter
 from studio.narration import (
     align_beats,
+    align_beats_to_words,
     build_transcript,
     caption_timeline,
     emphasis_timeline,
@@ -50,6 +51,7 @@ __all__ = [
     "cue_timings",
     "build_transcript",
     "align_beats",
+    "align_beats_to_words",
     "caption_timeline",
     "emphasis_timeline",
     "image_timeline",

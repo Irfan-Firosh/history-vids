@@ -20,6 +20,7 @@ robust to how the TTS pronounces numbers, abbreviations, or hyphenated words.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from itertools import accumulate
 
@@ -106,6 +107,73 @@ def align_beats(
     spans: list[tuple[float, float]] = []
     start = 0.0
     for end in boundaries:
+        spans.append((round(start, 3), round(end, 3)))
+        start = end
+    return spans
+
+
+_NORM = re.compile(r"[^a-z0-9]+")
+
+
+def _norm_len(text: str) -> int:
+    """Length of `text` with everything but letters/digits stripped and lowercased — a stable
+    per-token size that survives punctuation and casing (used to match beats to spoken words)."""
+    return len(_NORM.sub("", text.lower()))
+
+
+def align_beats_to_words(
+    narrations: Sequence[str],
+    words: Sequence[str],
+    word_starts: Sequence[float],
+    word_ends: Sequence[float],
+) -> list[tuple[float, float]]:
+    """Map ordered beats onto the audio by ANCHORING each beat's end to the REAL spoken word where
+    its narration text runs out — the accurate replacement for the proportional ``align_beats``.
+
+    Cartesia returns the actual spoken ``words`` with per-word ``start``/``end`` times. Because the
+    transcript is exactly the beats joined in order, we walk that spoken-word stream and hand words
+    to each beat until the beat's normalised character budget is spent, snapping to whichever word
+    end lands the beat length closest to its text — so every cut falls on the true word boundary
+    instead of a character-proportion estimate that drifts several seconds mid-video. Robust to how
+    TTS pronounces numbers/abbreviations (a few over/under-counted characters shift the cut by at
+    most a word, and never accumulate because each beat re-anchors from the current pointer). Falls
+    back to the proportional ``align_beats`` when no word text is available. Returns contiguous,
+    monotonic (start, end) spans over ``[0, total]`` (``total`` = last word end)."""
+    n = len(narrations)
+    if n == 0:
+        return []
+    total = float(word_ends[-1]) if len(word_ends) else 0.0
+    if not words or total <= 0:
+        return align_beats([max(_norm_len(x), 1) for x in narrations], word_starts, word_ends)
+
+    wlen = [_norm_len(w) for w in words]
+    nwords = len(words)
+    spans: list[tuple[float, float]] = []
+    wi = 0
+    start = 0.0
+    for bi, narr in enumerate(narrations):
+        if bi == n - 1:  # last beat always runs to the end of the audio
+            end = total
+            wi = nwords
+        else:
+            target = max(_norm_len(narr), 1)
+            got = 0
+            # Leave at least one spoken word for each remaining beat so none starve on a mismatch.
+            limit = nwords - (n - 1 - bi)
+            end = word_ends[wi] if wi < nwords else total
+            while wi < limit:
+                nxt = got + wlen[wi]
+                # Stop once including this word would overshoot the beat's text more than stopping
+                # short of it undershoots — i.e. snap to the word end closest to the true length.
+                if nxt >= target and got > 0 and (nxt - target) > (target - got):
+                    end = word_ends[wi - 1]
+                    break
+                got = nxt
+                end = word_ends[wi]
+                wi += 1
+                if got >= target:
+                    break
+        end = min(max(end, start), total)  # clamp monotonic + within the audio
         spans.append((round(start, 3), round(end, 3)))
         start = end
     return spans
