@@ -84,11 +84,21 @@ def test_list_runs_summarises(client):
     assert runs[0]["rendered"] == 1 and runs[0]["scene_count"] == 1
 
 
+def test_get_manifest_and_log(client):
+    assert client.get("/api/runs/20260101-000000").json()["title"] == "Demo"
+    assert "run started" in client.get("/api/runs/20260101-000000/log").text
+
+
 def test_serve_image_and_video(client):
     img = client.get("/api/runs/20260101-000000/file/img_0.png")
     vid = client.get("/api/runs/20260101-000000/file/video.mp4")
     assert img.status_code == 200 and img.content.startswith(b"\x89PNG")
     assert vid.status_code == 200 and vid.content == b"fake-mp4"
+
+
+def test_missing_run_is_404(client):
+    assert client.get("/api/runs/nope").status_code == 404
+    assert client.get("/api/runs/20260101-000000/file/secret.txt").status_code == 404
 
 
 def test_traversal_is_blocked(client):
@@ -171,9 +181,63 @@ def test_demo_run_does_not_pause_for_review(client, monkeypatch):
     assert "--review" not in captured["cmd"]
 
 
+def test_approve_gated_and_spawns_assemble(client, monkeypatch):
+    run = dash.RUNS_DIR / "20260101-000000"
+    _mark_pending_approval(run)
+    assert client.get("/api/runs/20260101-000000").json()["approval"]["available"] is True
+
+    captured: dict = {}
+
+    class FakeProc:
+        def poll(self):
+            return None
+
+    def fake_popen(cmd, *a, **k):
+        captured["cmd"] = cmd
+        return FakeProc()
+
+    monkeypatch.setattr(dash.subprocess, "Popen", fake_popen)
+    r = client.post("/api/runs/20260101-000000/approve", json={})
+    assert r.status_code == 202 and r.json()["assembling"] is True
+    assert "--assemble-only" in captured["cmd"]
+
+
 def test_approve_rejected_when_not_pending(client):
     # the fixture run is completed → not awaiting approval
     assert client.post("/api/runs/20260101-000000/approve", json={}).status_code == 400
+
+
+# ── thumbnail generation ───────────────────────────────────────────────────────
+def test_thumbnail_available_when_run_has_images(client):
+    # the fixture run has img_0.png → a thumbnail can be generated for it
+    assert client.get("/api/runs/20260101-000000").json()["thumbnail"]["available"] is True
+
+
+def test_thumbnail_spawns_with_text_and_provider(client, monkeypatch):
+    captured: dict = {}
+
+    class FakeProc:
+        def poll(self):
+            return None
+
+    def fake_popen(cmd, *a, **k):
+        captured["cmd"] = cmd
+        return FakeProc()
+
+    monkeypatch.setattr(dash.subprocess, "Popen", fake_popen)
+    r = client.post("/api/runs/20260101-000000/thumbnail", json={"text": "WHY WE SLEEP"})
+    assert r.status_code == 202 and r.json()["generating_thumbnail"] is True
+    cmd = captured["cmd"]
+    assert "--thumbnail" in cmd
+    assert cmd[cmd.index("--thumb-text") + 1] == "WHY WE SLEEP"
+    assert cmd[cmd.index("--images") + 1] == "placeholder"  # the run's provider, reconstructed
+
+
+def test_delete_run_removes_it(client, tmp_path):
+    assert client.get("/api/runs/20260101-000000").status_code == 200
+    r = client.request("DELETE", "/api/runs/20260101-000000")
+    assert r.status_code == 200 and r.json()["deleted"] == "20260101-000000"
+    assert client.get("/api/runs/20260101-000000").status_code == 404  # gone
 
 
 def test_delete_missing_run_is_404(client):
@@ -184,9 +248,55 @@ def test_delete_traversal_blocked(client):
     assert client.request("DELETE", "/api/runs/..%2f..%2fetc").status_code == 404
 
 
+# ── re-edit (reassemble: fresh Cartesia TTS + retimed cuts, reusing images) ─────
+def test_reedit_unavailable_without_storyboard(client):
+    # The fixture run has img_0.png but no storyboard.json → cannot be re-edited.
+    reedit = client.get("/api/runs/20260101-000000").json()["reedit"]
+    assert reedit["available"] is False and reedit["video"] is None
+
+
 def test_reedit_rejected_without_storyboard(client):
     r = client.post("/api/runs/20260101-000000/reassemble", json={"speed": 0.9})
     assert r.status_code == 400
+
+
+def test_reedit_triggers_and_locks(client, tmp_path, monkeypatch):
+    run = dash.RUNS_DIR / "20260101-000000"
+    (run / "storyboard.json").write_text('{"title": "t", "style": "s", "scenes": []}')
+
+    class FakeProc:
+        def __init__(self):
+            self.done = False
+
+        def poll(self):
+            return None if not self.done else 0
+
+    created: list[FakeProc] = []
+
+    def fake_popen(*a, **k):
+        p = FakeProc()
+        created.append(p)
+        return p
+
+    monkeypatch.setattr(dash.subprocess, "Popen", fake_popen)
+
+    r = client.post("/api/runs/20260101-000000/reassemble", json={"speed": 2.0})
+    assert r.status_code == 202
+    assert r.json()["reassembling"] is True and r.json()["speed"] == 1.5  # clamped to [0.6, 1.5]
+
+    # While it runs, the run reports re-editing and a second trigger is refused.
+    assert client.get("/api/runs/20260101-000000").json()["reedit"]["running"] is True
+    assert client.post("/api/runs/20260101-000000/reassemble", json={}).status_code == 409
+
+    created[0].done = True  # finished → allowed again
+    assert client.post("/api/runs/20260101-000000/reassemble", json={}).status_code == 202
+
+
+def test_reedit_reports_existing_v2_video(client):
+    (dash.RUNS_DIR / "20260101-000000" / "storyboard.json").write_text('{"scenes": []}')
+    (dash.RUNS_DIR / "20260101-000000" / "video_v2.mp4").write_bytes(b"fake-v2")
+    reedit = client.get("/api/runs/20260101-000000").json()["reedit"]
+    assert reedit["available"] is True and reedit["video"] == "video_v2.mp4"
 
 
 # ── resume (pick up a stopped/failed run, reusing frames on disk) ──────────────
@@ -199,8 +309,39 @@ def _mark_failed_with_storyboard(run_dir, images_provider="gemini/agnes"):
     (run_dir / "storyboard.json").write_text('{"title": "t", "scenes": []}')
 
 
+def test_resume_unavailable_when_completed(client):
+    # The fixture run is completed → not resumable.
+    assert client.get("/api/runs/20260101-000000").json()["resume"]["available"] is False
+
+
 def test_resume_rejected_without_storyboard(client):
     m = json.loads((dash.RUNS_DIR / "20260101-000000" / "run.json").read_text())
     m["status"] = "failed"
     (dash.RUNS_DIR / "20260101-000000" / "run.json").write_text(json.dumps(m))
     assert client.post("/api/runs/20260101-000000/resume", json={}).status_code == 400
+
+
+def test_resume_reconstructs_providers_and_flags(client, monkeypatch):
+    run = dash.RUNS_DIR / "20260101-000000"
+    _mark_failed_with_storyboard(run, images_provider="gemini/agnes")
+    assert client.get("/api/runs/20260101-000000").json()["resume"]["available"] is True
+
+    captured: dict = {}
+
+    class FakeProc:
+        def poll(self):
+            return None
+
+    def fake_popen(cmd, *a, **k):
+        captured["cmd"] = cmd
+        return FakeProc()
+
+    monkeypatch.setattr(dash.subprocess, "Popen", fake_popen)
+    r = client.post("/api/runs/20260101-000000/resume", json={"captions": False})
+    assert r.status_code == 202 and r.json()["resuming"] is True
+    cmd = captured["cmd"]
+    assert "--resume" in cmd and "--no-captions" in cmd
+    assert cmd[cmd.index("--char-model") + 1] == "gemini"
+    assert cmd[cmd.index("--concept-model") + 1] == "agnes"
+    assert cmd[cmd.index("--fallback") + 1] == "agnes"  # different reliable model than gemini char
+    assert cmd[cmd.index("--voice") + 1] == "cartesia"
