@@ -45,6 +45,12 @@ def test_styled_prompt_appends_locked_style():
     assert LOCKED_STYLE in out  # every image shares one style → consistency
 
 
+def test_locked_style_scopes_stick_figures_to_humans_only():
+    s = LOCKED_STYLE.lower()
+    assert "only humans are stick figures" in s  # people are stick figures…
+    assert "animals" in s and "not stick figures" in s  # …but animals/objects are normal cartoons
+
+
 def test_styled_prompt_appends_the_negative_list_on_every_path():
     from studio.style import NEGATIVE_PROMPT
 
@@ -64,11 +70,30 @@ def test_styled_prompt_is_stable_across_scenes():
     assert a.removeprefix("scene one") == b.removeprefix("scene two")  # identical style tail
 
 
+def test_styled_prompt_concept_map_forbids_people_and_drops_character_style():
+    # The bug: concept/map shots used LOCKED_STYLE ("stick-figure characters") → drew people.
+    out = styled_prompt("a flat world map", shot_type="map")
+    assert "no people" in out
+    assert LOCKED_STYLE not in out  # people-free CONCEPT_STYLE instead
+
+
 def test_styled_prompt_character_ref_locks_to_one_reference_figure():
     out = styled_prompt("a lone figure with a torch", use_character_ref=True)
     assert "reference image" in out and "Exactly one white-headed stick person" in out
     wide = styled_prompt("three people walking in snow", use_character_ref=True, shot_type="wide")
     assert "small simple group of white-headed stick people" in wide
+
+
+def test_character_shots_force_stick_figures_and_concept_shots_are_people_free():
+    # character/wide (with + without refs): an explicit "every human is a stick figure, no realistic
+    # people" guard, because the positive style alone let some detailed people slip through.
+    for st in ("character", "wide"):
+        out = styled_prompt("a roman senator giving a speech", shot_type=st).lower()
+        assert "stick figure" in out and "no realistic" in out
+    assert "stick figure" in styled_prompt("a figure", use_character_ref=True).lower()
+    # concept/map: hardened to keep people AND stick figures out (crowd-implying subjects leaked).
+    cout = styled_prompt("a busy ancient marketplace", shot_type="concept").lower()
+    assert "no people" in cout and "no stick figures" in cout
 
 
 # ── key-fact callout renderer (whitespace placement, no black box) ─────────────
