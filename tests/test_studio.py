@@ -51,6 +51,16 @@ def test_locked_style_scopes_stick_figures_to_humans_only():
     assert "animals" in s and "not stick figures" in s  # …but animals/objects are normal cartoons
 
 
+def test_locked_style_matches_the_new_explainer_spec():
+    # The current spec comes from assets/refs stills: crude marker-cartoon frames, white heads,
+    # wobbly black linework, flat colors, plain backgrounds, and simple diagram-like staging.
+    s = LOCKED_STYLE.lower()
+    for token in ("assets/refs", "marker", "wobbly", "white", "flat", "empty space"):
+        assert token in s, token
+    for gone in ("cinematic lighting", "photorealistic", "professional"):
+        assert gone not in s, gone
+
+
 def test_styled_prompt_appends_the_negative_list_on_every_path():
     from studio.style import NEGATIVE_PROMPT
 
