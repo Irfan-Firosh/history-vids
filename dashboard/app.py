@@ -79,6 +79,12 @@ class ResumeRequest(BaseModel):
     captions: bool = True
 
 
+class ApproveRequest(BaseModel):
+    """Approve payload — assemble the reviewed images into the final video."""
+
+    captions: bool = True
+
+
 # ── helpers ───────────────────────────────────────────────────────────────────
 def _run_dir(run_id: str) -> Path:
     """Resolve a run dir, rejecting any id that escapes RUNS_DIR (path-traversal guard)."""
@@ -140,6 +146,22 @@ def _resume_state(run_dir: Path, run_id: str, manifest: dict) -> dict:
         and not running
     )
     return {"available": resumable, "running": _is_active(run_id, "resume")}
+
+
+def _approval_state(run_dir: Path, run_id: str, manifest: dict) -> dict:
+    """Drives the review UI. ``available`` = awaiting approval (show Approve). ``editable`` = the
+    per-scene Regenerate controls can be shown — true at the review gate AND on a finished run
+    (tweak an image post-hoc; regenerating drops it back to pending_approval so Approve rebuilds).
+    Plus whether an approve (assemble) / regenerate job is currently running."""
+    status = manifest.get("status")
+    has_content = (run_dir / "storyboard.json").is_file() and (run_dir / "img_0.png").is_file()
+    return {
+        "available": status == "pending_approval" and (run_dir / "storyboard.json").is_file(),
+        "editable": has_content and status in ("pending_approval", "completed")
+        and not _is_active(run_id),
+        "assembling": _is_active(run_id, "assemble"),
+        "regenerating": _is_active(run_id, "regenerate"),
+    }
 
 
 # ── routes ────────────────────────────────────────────────────────────────────
@@ -342,3 +364,38 @@ def resume_run(run_id: str, req: ResumeRequest) -> dict[str, object]:
         log.close()
         _active.update(run_id=run_id, proc=proc, mode="resume")
     return {"run_id": run_id, "resuming": True, "captions": req.captions}
+
+
+@app.post("/api/runs/{run_id}/approve", status_code=202)
+def approve_run(run_id: str, req: ApproveRequest) -> dict[str, object]:
+    """Approve a reviewed run: assemble the final video from the images + narration already on disk.
+
+    The human-in-the-loop gate — a topic run pauses at ``pending_approval`` after generating every
+    image; NOTHING is compiled until this is called. Reuses the exact narration + frames (no regen,
+    no new TTS); progress lands in ``assemble.log``.
+    """
+    run_dir = _run_dir(run_id)  # 404 + traversal-guarded
+    storyboard = run_dir / "storyboard.json"
+    manifest = _read_manifest(run_dir) or {}
+    if manifest.get("status") != "pending_approval" or not storyboard.is_file():
+        raise HTTPException(status_code=400, detail="run is not awaiting approval")
+
+    with _lock:
+        proc = _active["proc"]
+        if proc is not None and proc.poll() is None:
+            raise HTTPException(
+                status_code=409, detail=f"run {_active['run_id']} still in progress"
+            )
+        cmd = [
+            sys.executable, str(POC_SCRIPT),
+            "--assemble-only", "--storyboard", str(storyboard), "--run-id", run_id,
+        ]
+        if not req.captions:
+            cmd.append("--no-captions")
+        log = (run_dir / "assemble.log").open("w", encoding="utf-8")
+        proc = subprocess.Popen(
+            cmd, cwd=str(REPO_ROOT), stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
+        )
+        log.close()
+        _active.update(run_id=run_id, proc=proc, mode="assemble")
+    return {"run_id": run_id, "assembling": True}
