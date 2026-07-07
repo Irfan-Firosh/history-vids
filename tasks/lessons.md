@@ -1,5 +1,16 @@
 # Lessons
 
+## 2026-07-07 — The real visual target is the local `assets/refs` stills, not abstract style words
+**Correction:** The user explicitly pointed to `assets/refs` as the image standard and asked for the
+Agnes prompts to be rebuilt from those frames. The old prompt still sounded like a generic
+"minimalist educational-explainer" style, which is too vague and too polished.
+**Rule:** When prompting Agnes, describe the concrete visual grammar from the reference stills:
+low-budget hand-drawn marker-cartoon frame, thick uneven black outlines, wobbly linework, flat fill
+colors, plain pale backgrounds, lots of empty space, white round-headed stick people with dot eyes and
+tiny line mouths, noodle limbs, crude flat clothing/hair add-ons, and simple props/diagrams. Avoid
+cinematic/realistic/ornate/detail words in BOTH the style wrapper and GPT-OSS image_prompt
+instructions; those words overpower the stick-figure style and make Agnes drift.
+
 ## 2026-07-02 — Provider retry must cover NETWORK exceptions, not just HTTP status codes
 **Correction:** A 43-frame Agnes render failed at scene 5 with `httpx` "Server disconnected without
 sending a response." The provider only retried on 429/5xx *status codes*, so a transport-level
