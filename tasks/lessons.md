@@ -251,3 +251,19 @@ beat spans): greedily enforce a **minimum gap** (~35s) between kept callouts —
 independent of how many the LLM proposes — AND tell the model to be sparse. Compute the surviving set
 ONCE, then drive both the rendered overlays and the dashboard badges/plan from it so they always match.
 
+## 2026-07-06 — Beat cuts must anchor to REAL word timings, not character-proportion
+**Bug (user):** "the timing of the video and the display of images is off by a lot." Measured against
+real Cartesia timestamps: the old `align_beats` (distribute audio by each beat's CHARACTER count, then
+snap to a nearby pause) drifted the image cuts up to **3.5s AHEAD** of the narration through the whole
+middle of a 4-min video (21/45 beats off ≥1.5s), then snapped back. Character proportion is a poor
+proxy — speech rate isn't uniform beat to beat.
+**Rule:** When the TTS returns per-word timestamps (Cartesia `add_timestamps`), capture the `words`
+array too (not just `start`/`end`) and ANCHOR each beat's end to the actual spoken word where its
+narration text runs out (`align_beats_to_words`): walk the spoken-word stream, hand words to each beat
+until its normalised-char budget is spent, cut at that word's real end time. Drift → **0.00s** (verified
+on real audio). Robust to number expansion ("35,000"→"thirty five thousand") via a per-beat re-anchor +
+a "leave ≥1 word per remaining beat" starvation guard. Keep the proportional `align_beats` only as the
+fallback for voices with no word text (offline `say`). Don't throw away signal you already fetched.
+**Verify tip:** to quantify alignment drift without a full render, replay ONE Cartesia call, cache the
+word arrays to disk, and diff algorithm-boundaries vs word-anchored "truth" offline (free iteration).
+
