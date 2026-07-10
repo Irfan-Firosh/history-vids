@@ -85,6 +85,13 @@ class ApproveRequest(BaseModel):
     captions: bool = True
 
 
+class RegenerateRequest(BaseModel):
+    """Regenerate payload — re-draw one scene's image(s), optionally with an edited prompt."""
+
+    scene_index: int
+    prompt: str | None = None
+
+
 class ThumbnailRequest(BaseModel):
     """Thumbnail payload — big title words + optional focal subject (both default from the run)."""
 
@@ -436,6 +443,50 @@ def approve_run(run_id: str, req: ApproveRequest) -> dict[str, object]:
         log.close()
         _active.update(run_id=run_id, proc=proc, mode="assemble")
     return {"run_id": run_id, "assembling": True}
+
+
+@app.post("/api/runs/{run_id}/regenerate", status_code=202)
+def regenerate_scene(run_id: str, req: RegenerateRequest) -> dict[str, object]:
+    """Re-draw ONE scene's image(s), optionally with an edited prompt — during the review gate OR on
+    an already-finished run.
+
+    Reconstructs the run's image providers from its manifest, overwrites that scene's frame(s), and
+    leaves the run in ``pending_approval`` (so a completed run drops back into the gate → Approve
+    rebuilds the video with the new image). Needs a saved storyboard + generated images; the single-
+    run lock (409) prevents regenerating while another job is live.
+    """
+    run_dir = _run_dir(run_id)  # 404 + traversal-guarded
+    storyboard = run_dir / "storyboard.json"
+    manifest = _read_manifest(run_dir) or {}
+    if not storyboard.is_file() or not (run_dir / "img_0.png").is_file():
+        raise HTTPException(status_code=400, detail="run has no saved storyboard + images to edit")
+    if req.scene_index < 0:
+        raise HTTPException(status_code=400, detail="scene_index must be >= 0")
+    provider = str(manifest.get("images_provider") or "gemini")
+    provider_flags, char = _image_provider_flags(provider)
+
+    with _lock:
+        proc = _active["proc"]
+        if proc is not None and proc.poll() is None:
+            raise HTTPException(
+                status_code=409, detail=f"run {_active['run_id']} still in progress"
+            )
+        cmd = [
+            sys.executable, str(POC_SCRIPT),
+            "--regenerate", str(req.scene_index),
+            "--storyboard", str(storyboard), "--run-id", run_id, "--voice", "say",
+            *provider_flags,
+            "--fallback", "agnes" if char == "gemini" else "gemini",
+        ]
+        if req.prompt:
+            cmd += ["--prompt", req.prompt]
+        log = (run_dir / "regenerate.log").open("w", encoding="utf-8")
+        proc = subprocess.Popen(
+            cmd, cwd=str(REPO_ROOT), stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
+        )
+        log.close()
+        _active.update(run_id=run_id, proc=proc, mode="regenerate")
+    return {"run_id": run_id, "regenerating": True, "scene_index": req.scene_index}
 
 
 @app.post("/api/runs/{run_id}/thumbnail", status_code=202)

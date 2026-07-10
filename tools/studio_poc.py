@@ -1039,6 +1039,45 @@ def assemble_storyboard(rec: RunRecorder, sb, captions: bool = True) -> Path:
         raise
 
 
+def regenerate_scene(
+    rec: RunRecorder, sb, images: ImageProviders, scene_index: int,
+    fallback=None, prompt_override: str | None = None,
+) -> None:
+    """Re-draw ONE scene's image(s) during the review gate (human-in-the-loop). Overwrites
+    ``img_{i}[_k].png`` in place, keeps the run in ``pending_approval`` (nothing is assembled), and
+    optionally swaps in an edited prompt in place of the script's ``image_prompt``."""
+    if not 0 <= scene_index < len(sb.scenes):
+        raise RuntimeError(f"scene index {scene_index} out of range (0..{len(sb.scenes) - 1})")
+    sc = sb.scenes[scene_index]
+    beat_spans = _load_beat_spans(rec.dir)
+    if beat_spans is not None and scene_index < len(beat_spans):
+        s, e = beat_spans[scene_index]
+        n = frames_for_span(e - s, intense=sc.intense)
+    else:
+        n = 1
+    is_char = shot_uses_character(sc.shot_type)
+    provider = images.character if is_char else images.concept
+    refs = load_channel_refs() if (is_char and provider.name in REF_CAPABLE) else []
+    subject = (prompt_override or sc.image_prompt).strip()
+    styled = styled_prompt(subject, sb.style, use_character_ref=bool(refs), shot_type=sc.shot_type)
+    edited = " · edited prompt" if prompt_override else ""
+    rec.log(f"regenerating scene {scene_index} ({provider.name}) · {n} frame(s){edited}")
+    try:
+        for k in range(n):
+            target = rec.dir / _frame_name(scene_index, k)
+            _generate_frame(
+                provider, _frame_prompt(styled, k), target, refs, fallback, rec, scene_index, k
+            )
+        rec.scene_image(scene_index, rec.dir / f"img_{scene_index}.png")
+        rec.pending_approval()  # stay in the review gate — the user still has to approve
+        rec.log(f"scene {scene_index} regenerated — still awaiting your approval")
+        print(f"  ↻ regenerated scene {scene_index}")
+    except Exception as exc:
+        rec.failed(exc)
+        print(f"\n❌ regenerate failed: {exc}", file=sys.stderr)
+        raise
+
+
 def _thumbnail_subject(sb, override: str | None = None) -> str:
     """Pick a striking focal subject for the thumbnail: an explicit override, else the first intense
     character/wide scene, else the first character/wide scene, else the title."""

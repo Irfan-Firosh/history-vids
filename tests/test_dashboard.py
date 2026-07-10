@@ -207,6 +207,51 @@ def test_approve_rejected_when_not_pending(client):
     assert client.post("/api/runs/20260101-000000/approve", json={}).status_code == 400
 
 
+def test_regenerate_spawns_with_scene_and_providers(client, monkeypatch):
+    run = dash.RUNS_DIR / "20260101-000000"
+    _mark_pending_approval(run, images_provider="gemini/agnes")
+
+    captured: dict = {}
+
+    class FakeProc:
+        def poll(self):
+            return None
+
+    def fake_popen(cmd, *a, **k):
+        captured["cmd"] = cmd
+        return FakeProc()
+
+    monkeypatch.setattr(dash.subprocess, "Popen", fake_popen)
+    r = client.post("/api/runs/20260101-000000/regenerate", json={"scene_index": 2})
+    assert r.status_code == 202 and r.json()["scene_index"] == 2
+    cmd = captured["cmd"]
+    assert cmd[cmd.index("--regenerate") + 1] == "2"
+    assert cmd[cmd.index("--char-model") + 1] == "gemini"
+    assert cmd[cmd.index("--concept-model") + 1] == "agnes"
+    assert cmd[cmd.index("--fallback") + 1] == "agnes"  # distinct from the gemini char provider
+
+
+def test_regenerate_rejected_without_storyboard(client):
+    # the fixture run has img_0 but no storyboard.json → nothing to reconstruct scenes from
+    r = client.post("/api/runs/20260101-000000/regenerate", json={"scene_index": 0})
+    assert r.status_code == 400
+
+
+def test_regenerate_allowed_on_completed_run(client, monkeypatch):
+    # You can tweak an image on a FINISHED run too (it drops back to the review gate for Approve).
+    run = dash.RUNS_DIR / "20260101-000000"
+    (run / "storyboard.json").write_text('{"title": "t", "scenes": []}')  # status stays "completed"
+    assert client.get("/api/runs/20260101-000000").json()["approval"]["editable"] is True
+
+    class FakeProc:
+        def poll(self):
+            return None
+
+    monkeypatch.setattr(dash.subprocess, "Popen", lambda *a, **k: FakeProc())
+    r = client.post("/api/runs/20260101-000000/regenerate", json={"scene_index": 0})
+    assert r.status_code == 202 and r.json()["regenerating"] is True  # allowed on a completed run
+
+
 # ── thumbnail generation ───────────────────────────────────────────────────────
 def test_thumbnail_available_when_run_has_images(client):
     # the fixture run has img_0.png → a thumbnail can be generated for it
@@ -231,6 +276,30 @@ def test_thumbnail_spawns_with_text_and_provider(client, monkeypatch):
     assert "--thumbnail" in cmd
     assert cmd[cmd.index("--thumb-text") + 1] == "WHY WE SLEEP"
     assert cmd[cmd.index("--images") + 1] == "placeholder"  # the run's provider, reconstructed
+
+
+def test_regenerate_forwards_an_edited_prompt(client, monkeypatch):
+    run = dash.RUNS_DIR / "20260101-000000"
+    _mark_pending_approval(run, images_provider="agnes")
+
+    captured: dict = {}
+
+    class FakeProc:
+        def poll(self):
+            return None
+
+    def fake_popen(cmd, *a, **k):
+        captured["cmd"] = cmd
+        return FakeProc()
+
+    monkeypatch.setattr(dash.subprocess, "Popen", fake_popen)
+    r = client.post(
+        "/api/runs/20260101-000000/regenerate",
+        json={"scene_index": 1, "prompt": "a calm figure gazing at the stars"},
+    )
+    assert r.status_code == 202
+    cmd = captured["cmd"]
+    assert cmd[cmd.index("--prompt") + 1] == "a calm figure gazing at the stars"
 
 
 def test_delete_run_removes_it(client, tmp_path):
