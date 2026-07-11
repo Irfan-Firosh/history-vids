@@ -528,6 +528,61 @@ def test_run_recorder_load_preserves_existing_manifest(tmp_path):
     assert [s.image_prompt for s in reloaded.manifest.scenes] == ["a lone figure"]
 
 
+def test_render_storyboard_pause_for_review_stops_before_assembly(tmp_path, monkeypatch):
+    from studio.run_log import RunRecorder
+    from tools import studio_poc
+
+    sb = studio_poc.DEMO_STORYBOARD
+    # Stub the expensive bits so only the review gate is exercised (no TTS, images, or ffmpeg).
+    monkeypatch.setattr(
+        studio_poc, "build_narration",
+        lambda scenes, voice, out_dir: (out_dir / "narration.wav", [(0.0, 4.0)] * len(scenes)),
+    )
+    monkeypatch.setattr(studio_poc, "_save_beat_spans", lambda *a, **k: None)
+    monkeypatch.setattr(studio_poc, "_generate_frame", lambda *a, **k: None)
+    assembled = {"called": False}
+    monkeypatch.setattr(
+        studio_poc, "_assemble_video", lambda *a, **k: assembled.__setitem__("called", True),
+    )
+
+    class _Voice:
+        name = "say"
+
+    rec = RunRecorder.create(
+        tmp_path, title="t", images_provider="placeholder", voice_provider="say",
+        scene_count=len(sb.scenes),
+    )
+    images = studio_poc.providers_from_roles("placeholder", "placeholder")
+    out = studio_poc.render_storyboard(rec, sb, images, _Voice(), pause_for_review=True)
+    assert out is None  # nothing assembled
+    assert assembled["called"] is False  # the assembler was never reached
+    assert rec.manifest.status == "pending_approval"
+
+
+def test_assemble_storyboard_requires_narration_on_disk(tmp_path):
+    from studio.run_log import RunRecorder
+    from tools import studio_poc
+
+    rec = RunRecorder.create(
+        tmp_path, title="t", images_provider="placeholder", voice_provider="say",
+        scene_count=len(studio_poc.DEMO_STORYBOARD.scenes),
+    )
+    with pytest.raises(RuntimeError):  # no narration.wav / beat_spans.json yet
+        studio_poc.assemble_storyboard(rec, studio_poc.DEMO_STORYBOARD)
+
+
+def test_regenerate_scene_rejects_out_of_range_index(tmp_path):
+    from studio.run_log import RunRecorder
+    from tools import studio_poc
+
+    rec = RunRecorder.create(
+        tmp_path, title="t", images_provider="placeholder", voice_provider="say", scene_count=5,
+    )
+    images = studio_poc.providers_from_roles("placeholder", "placeholder")
+    with pytest.raises(RuntimeError):
+        studio_poc.regenerate_scene(rec, studio_poc.DEMO_STORYBOARD, images, 999)
+
+
 # ── Agnes content-policy soften-and-retry ──────────────────────────────────────
 def test_is_content_policy_error_detects_the_block():
     from studio import agnes

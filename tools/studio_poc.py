@@ -15,6 +15,7 @@ Providers:
 """
 from __future__ import annotations
 
+import argparse
 import base64
 import json
 import os
@@ -32,8 +33,10 @@ from typing import NamedTuple
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT))
 
+from dotenv import load_dotenv  # noqa: E402
 
 from studio import (  # noqa: E402
+    DEMO_STORYBOARD,
     RunRecorder,
     agnes,
     align_beats_to_words,
@@ -47,6 +50,7 @@ from studio import (  # noqa: E402
     image_timeline,
     scene_filter,
     shot_uses_character,
+    storyboard_from_dict,
     styled_prompt,
 )
 from studio.style import LOCKED_STYLE, PALETTE  # noqa: E402
@@ -1221,3 +1225,95 @@ def render_storyboard(
         rec.failed(exc)
         print(f"\n❌ run {rec.run_id} failed: {exc}", file=sys.stderr)
         raise
+
+
+def main() -> None:
+    load_dotenv()  # GEMINI_API_KEY / CARTESIA_* from .env
+    ap = argparse.ArgumentParser()
+    ap.add_argument(
+        "--images", choices=list(IMAGE_PROVIDER_NAMES), default="placeholder",
+        help="shorthand: pick a legacy provider mix for all image roles",
+    )
+    # Per-role overrides (the new run page): choose a provider for each image role independently.
+    ap.add_argument("--char-model", choices=list(IMAGE_PROVIDER_NAMES))
+    ap.add_argument("--concept-model", choices=list(IMAGE_PROVIDER_NAMES))
+    ap.add_argument("--voice", choices=["say", "cartesia"], default="say")
+    ap.add_argument("--storyboard", help="path to a generated storyboard.json (else the canned demo)")
+    ap.add_argument("--no-captions", action="store_true")
+    ap.add_argument("--run-id", help="pre-assigned run id (the dashboard passes this to locate the run dir)")
+    ap.add_argument("--out", help="optional extra copy of the final mp4 (always written into the run dir)")
+    ap.add_argument("--resume", action="store_true", help="reuse frames already on disk for this run-id")
+    ap.add_argument("--fallback", choices=list(IMAGE_PROVIDER_NAMES),
+                    help="secondary provider for frames the primary refuses/fails (e.g. a safety block)")
+    # Human-in-the-loop review gate.
+    ap.add_argument("--review", action="store_true",
+                    help="stop after generating all images; assemble only after approval")
+    ap.add_argument("--assemble-only", action="store_true",
+                    help="assemble the video from images + narration already on disk (approve step)")
+    ap.add_argument("--regenerate", type=int, metavar="SCENE",
+                    help="re-draw one scene's image(s) in an existing run (review step), then exit")
+    ap.add_argument("--prompt", help="edited image prompt to use with --regenerate (else the script's)")
+    # Thumbnail generation.
+    ap.add_argument("--thumbnail", action="store_true",
+                    help="generate a YouTube thumbnail for an existing run, then exit")
+    ap.add_argument("--thumb-text", help="the big title words for the thumbnail (else the run title)")
+    ap.add_argument("--thumb-subject", help="focal subject for the thumbnail (else a striking scene)")
+    args = ap.parse_args()
+
+    if args.char_model or args.concept_model:  # per-role selection
+        images = providers_from_roles(
+            args.char_model or args.images, args.concept_model or args.images
+        )
+        images_label = f"{images.character.name}/{images.concept.name}"
+    else:
+        images = build_providers(args.images)
+        images_label = args.images
+    voice = CartesiaVoiceProvider() if args.voice == "cartesia" else SayVoiceProvider()
+    sb = (
+        storyboard_from_dict(json.loads(Path(args.storyboard).read_text()))
+        if args.storyboard
+        else DEMO_STORYBOARD
+    )
+
+    # Review-gate follow-ups operate on an EXISTING run (loaded, not reset): approve → assemble the
+    # reviewed images; regenerate → re-draw one scene's image(s) and stay awaiting approval.
+    if args.assemble_only or args.regenerate is not None or args.thumbnail:
+        if not args.run_id:
+            ap.error("--assemble-only / --regenerate / --thumbnail require --run-id")
+        rec = RunRecorder.load(RUNS_DIR, args.run_id)
+        if args.assemble_only:
+            assemble_storyboard(rec, sb, captions=not args.no_captions)
+        elif args.thumbnail:
+            generate_thumbnail(rec, sb, images.character, text=args.thumb_text,
+                               subject=args.thumb_subject)
+        else:
+            fallback = make_image_provider(args.fallback) if args.fallback else None
+            regenerate_scene(rec, sb, images, args.regenerate, fallback, prompt_override=args.prompt)
+        return
+
+    # Each run records itself into result/axen/poc/runs/<run_id>/ (manifest + log + its own assets),
+    # so the dashboard can replay logs, intermediate images, and the final video while it runs.
+    rec = RunRecorder.create(
+        RUNS_DIR,
+        title=sb.title,
+        images_provider=images_label,
+        voice_provider=voice.name,
+        scene_count=len(sb.scenes),
+        run_id=args.run_id,
+    )
+    print(f"Storyboard: {sb.title!r} · {len(sb.scenes)} scenes · images={images_label} · voice={voice.name}")
+    print(f"Run: {rec.run_id}  →  {rec.dir}")
+    if args.storyboard:
+        attach_script_artifacts(rec, Path(args.storyboard))
+
+    fallback = make_image_provider(args.fallback) if args.fallback else None
+    out = render_storyboard(
+        rec, sb, images, voice, captions=not args.no_captions,
+        resume=args.resume, fallback=fallback, pause_for_review=args.review,
+    )
+    if args.out and out is not None:  # optional convenience copy (skipped when paused for review)
+        shutil.copy(out, args.out)
+
+
+if __name__ == "__main__":
+    main()
