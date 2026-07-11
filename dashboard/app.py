@@ -319,6 +319,29 @@ def trigger_run(req: RunRequest) -> dict[str, str]:
     return {"run_id": _spawn_run(req)}
 
 
+@app.post("/api/runs/{run_id}/rerun", status_code=201)
+def rerun_run(run_id: str) -> dict[str, str]:
+    """Start a FRESH run (new id) that reuses this run's topic + image providers + voice, then
+    regenerates everything from scratch — a new script and new images — unlike Resume (reuse the
+    frames on disk) or Re-edit (reuse images, new audio). 409 if a run is already live.
+
+    Duration band + captions aren't persisted on the manifest, so the re-run uses the defaults; the
+    topic and provider mix (the parts that define the run) are reconstructed from the source run.
+    """
+    run_dir = _run_dir(run_id)  # 404 + traversal-guarded
+    manifest = _read_manifest(run_dir) or {}
+    provider = str(manifest.get("images_provider") or "placeholder")
+    voice = "cartesia" if str(manifest.get("voice_provider", "")).startswith("cartesia") else "say"
+    kwargs: dict[str, object] = {"topic": manifest.get("topic") or None, "voice": voice}
+    if "/" in provider:  # per-role "char/concept" → separate model flags
+        char, concept = (provider.split("/") + [provider])[:2]
+        kwargs["char_model"] = char if char in _IMAGE_MODELS else "placeholder"
+        kwargs["concept_model"] = concept if concept in _IMAGE_MODELS else "placeholder"
+    else:  # legacy single-provider shorthand
+        kwargs["images"] = provider if provider in _IMAGE_MODELS else "placeholder"
+    return {"run_id": _spawn_run(RunRequest(**kwargs))}
+
+
 @app.post("/api/runs/{run_id}/reassemble", status_code=202)
 def reassemble_run(run_id: str, req: ReassembleRequest) -> dict[str, object]:
     """Re-edit a saved run: fresh Cartesia TTS + retimed image/caption cuts, reusing its images.

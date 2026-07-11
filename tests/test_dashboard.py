@@ -139,6 +139,49 @@ def test_invalid_provider_rejected(client):
     assert client.post("/api/runs", json={"images": "dalle"}).status_code == 422
 
 
+# ── re-run (fresh run reusing this run's topic + providers + voice) ────────────
+def test_rerun_reconstructs_topic_and_providers(client, monkeypatch):
+    run = dash.RUNS_DIR / "20260101-000000"
+    m = json.loads((run / "run.json").read_text())
+    m.update(images_provider="gemini/agnes", voice_provider="cartesia", topic="Battle of Tsushima")
+    (run / "run.json").write_text(json.dumps(m))
+
+    captured: dict = {}
+
+    class FakeProc:
+        def poll(self):
+            return None
+
+    def fake_popen(cmd, *a, **k):
+        captured["cmd"] = cmd
+        return FakeProc()
+
+    monkeypatch.setattr(dash.subprocess, "Popen", fake_popen)
+    r = client.post("/api/runs/20260101-000000/rerun")
+    assert r.status_code == 201 and r.json()["run_id"] != "20260101-000000"  # a brand-new run id
+    cmd = captured["cmd"]
+    assert cmd[cmd.index("--topic") + 1] == "Battle of Tsushima"  # topic reused → whole pipeline
+    assert cmd[cmd.index("--char-model") + 1] == "gemini"
+    assert cmd[cmd.index("--concept-model") + 1] == "agnes"
+    assert cmd[cmd.index("--voice") + 1] == "cartesia"
+    assert "--resume" not in cmd  # a re-run regenerates from scratch, unlike resume
+
+
+def test_rerun_locks_to_one_run(client, monkeypatch):
+    class FakeProc:
+        def poll(self):
+            return None  # stays alive
+
+    monkeypatch.setattr(dash.subprocess, "Popen", lambda *a, **k: FakeProc())
+    assert client.post("/api/runs/20260101-000000/rerun").status_code == 201
+    # A second trigger while the re-run is live → 409.
+    assert client.post("/api/runs/20260101-000000/rerun").status_code == 409
+
+
+def test_rerun_missing_run_is_404(client):
+    assert client.post("/api/runs/nope/rerun").status_code == 404
+
+
 # ── review gate (HITL: pause after images → approve to assemble / regenerate one image) ──
 def _mark_pending_approval(run_dir, images_provider="gemini/agnes"):
     m = json.loads((run_dir / "run.json").read_text())
