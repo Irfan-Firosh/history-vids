@@ -111,6 +111,7 @@ class PlaceholderImageProvider:
     """
 
     name = "placeholder"
+    uses_refs = False
 
     def generate(self, styled: str, out_path: Path, refs: Sequence[Path] = ()) -> Path:
         from PIL import Image, ImageDraw, ImageFont
@@ -148,6 +149,7 @@ class GeminiImageProvider:
     """
 
     name = "gemini"
+    uses_refs = True  # multi-reference conditioning on every character/wide shot
 
     def __init__(
         self,
@@ -200,6 +202,7 @@ class HuggingFaceImageProvider:
     """
 
     name = "hf"
+    uses_refs = False  # text-to-image only — `refs` are ignored
 
     def __init__(self, model: str | None = None, max_retries: int = 4) -> None:
         self.model = model or os.environ.get("HF_IMAGE_MODEL", huggingface.DEFAULT_MODEL)
@@ -239,6 +242,7 @@ class CloudflareImageProvider:
     """
 
     name = "cloudflare"
+    uses_refs = True  # up to 4 input images for character consistency
 
     # FLUX.2 [dev] is popular + capacity-constrained (frequent 429 "capacity exceeded" / 424 routing),
     # and each generation is slow (~1-2 min under load), so retry generously — rejections are instant.
@@ -326,8 +330,10 @@ class AgnesImageProvider:
         self.min_interval = float(os.environ.get("AGNES_MIN_INTERVAL", str(default_interval)))
         self._last_call = 0.0
         # Agnes's image-to-image (reference-upload) path is unreliable/slow — it hangs where plain
-        # text-to-image succeeds. Default to text-to-image (ignore refs); set AGNES_IMG2IMG=1 to re-enable.
-        self.use_img2img = os.environ.get("AGNES_IMG2IMG", "0") == "1"
+        # text-to-image succeeds. Default to text-to-image (ignore refs); set AGNES_IMG2IMG=1 to
+        # re-enable. This is per-INSTANCE, not per-provider-name: with it off Agnes consumes no
+        # reference image at all, and callers must not claim (or warn about) ref conditioning.
+        self.uses_refs = os.environ.get("AGNES_IMG2IMG", "0") == "1"
 
     def _data_uri(self, path: Path) -> str:
         """A reference image as a base64 PNG data URI (downscaled to keep the payload sane)."""
@@ -343,7 +349,7 @@ class AgnesImageProvider:
         return "data:image/png;base64," + _b64.b64encode(buf.getvalue()).decode()
 
     def _build_body(self, prompt: str, refs: Sequence[Path]) -> dict:
-        if refs and self.use_img2img:  # character/wide → image-to-image off the reference(s)
+        if refs and self.uses_refs:  # character/wide → image-to-image off the reference(s)
             return agnes.image_to_image_body(
                 prompt, [self._data_uri(Path(r)) for r in refs], self.size, self.model
             )
@@ -869,9 +875,15 @@ def _load_beat_spans(out_dir: Path) -> list[tuple[float, float]] | None:
         return None
 
 
-#: Providers that condition on a reference image to keep the recurring character on-model
-#: (Gemini reference-conditioning, Cloudflare FLUX.2 input images, Agnes image-to-image).
-REF_CAPABLE = frozenset({"gemini", "cloudflare", "agnes"})
+def wants_refs(provider) -> bool:
+    """Does THIS provider instance actually consume reference images?
+
+    Read off the instance (``uses_refs``), never off the provider NAME: Agnes only conditions on a
+    reference when ``AGNES_IMG2IMG=1``, so a name-based check claimed ref-conditioned consistency
+    for the default Agnes setup that never sends a reference at all — and told the user to generate
+    ref sheets that would then be ignored. Unknown/duck-typed providers default to False.
+    """
+    return bool(getattr(provider, "uses_refs", False))
 
 #: Every selectable image provider by name → constructor. `cloudflare` (slow/capacity-unreliable)
 #: and `hf` (weaker quality) are kept working but are NOT offered on the dashboard picker — Gemini
@@ -1061,7 +1073,7 @@ def regenerate_scene(
         n = 1
     is_char = shot_uses_character(sc.shot_type)
     provider = images.character if is_char else images.concept
-    refs = load_channel_refs() if (is_char and provider.name in REF_CAPABLE) else []
+    refs = load_channel_refs() if (is_char and wants_refs(provider)) else []
     subject = (prompt_override or sc.image_prompt).strip()
     styled = styled_prompt(subject, sb.style, use_character_ref=bool(refs), shot_type=sc.shot_type)
     edited = " · edited prompt" if prompt_override else ""
@@ -1140,11 +1152,23 @@ def render_storyboard(
     `fallback` is a secondary provider used when the primary refuses/fails a frame. Shared by the CLI
     (`main`) and the dashboard's `run_pipeline`; records failure + re-raises.
     """
-    channel_refs = load_channel_refs() if images.character.name in REF_CAPABLE else []
-    if images.character.name in REF_CAPABLE and not channel_refs:
-        msg = "no assets/refs/ found — run tools/make_refs.py first for character consistency."
+    # State the consistency mode plainly, once, in the run log — it silently decides how well the
+    # recurring character holds across ~50 frames, and it is NOT what the provider name implies.
+    char_wants_refs = wants_refs(images.character)
+    channel_refs = load_channel_refs() if char_wants_refs else []
+    if char_wants_refs and not channel_refs:
+        msg = (f"{images.character.name} conditions on reference images but "
+               f"{REFS_DIR.relative_to(_ROOT)}/character.png + expressions.png are missing — run "
+               f"`python tools/make_refs.py` (needs GEMINI_API_KEY + billing) and commit them. "
+               f"Falling back to prompt-only consistency for this run.")
         print(f"  ⚠ {msg}")
         rec.log(f"WARN: {msg}")
+    elif char_wants_refs:
+        rec.log(f"character consistency: reference-conditioned ({images.character.name}, "
+                f"{len(channel_refs)} ref image(s))")
+    else:
+        rec.log(f"character consistency: prompt-only ({images.character.name} sends no reference "
+                f"image; set AGNES_IMG2IMG=1 or use --char-model gemini to condition on refs)")
     try:
         # 1) Whole-script narration → one continuous wav + a real (start,end) span per beat. On a
         # resume, reuse the saved narration.wav + spans so timings stay identical to the frames

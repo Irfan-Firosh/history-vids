@@ -43,13 +43,19 @@ outlines, flat muted colors, no shading, **minimal backgrounds** (also maps/prop
 Locked in `studio/style.py::LOCKED_STYLE` (+ `STYLE_SEED`). Per-scene prompts must carry the **facial
 expression** (the only emotional signal) — the style block stays fixed.
 
-**Consistency (the hard part) — SOLVED via reference conditioning (validated):**
-Gemini "Nano Banana" takes input images, so every `character`/`wide` shot is generated with **REF-1**
-(character model sheet) + **REF-2** (expression sheet) from `assets/refs/`. The recurring figure stays
-on-model across scenes (verified on the live PoC: same head/line-weight/palette in cave, forest, night,
-campfire shots). **No LoRA / seed tuning needed** — this beat the fixed-seed FLUX plan. `concept`/`map`
-shots pass no refs (`studio.types.shot_uses_character`). Refs are generated from **our own** prompts
-(`tools/make_refs.py`) and committed (rights-clean), never scraped competitor frames.
+**Consistency (the hard part) — two modes, and the live one is NOT reference conditioning:**
+
+| Mode | When | Status |
+|---|---|---|
+| **Reference-conditioned** — every `character`/`wide` shot generated with **REF-1** (model sheet) + **REF-2** (expressions) | `--char-model gemini` (or Cloudflare, or Agnes with `AGNES_IMG2IMG=1`) **and** `assets/refs/character.png` + `expressions.png` present | ⚠️ **not currently available** — the ref sheets are absent from `assets/refs/` (only gitignored study frames are there). Regenerate with `python tools/make_refs.py` (needs `GEMINI_API_KEY` + billing) and commit them. |
+| **Prompt-only** — consistency rides entirely on `LOCKED_STYLE` | the recommended Agnes default (`AGNES_IMG2IMG=0`, text-to-image) | ✅ what every recent run actually used |
+
+Validated once on the live Gemini PoC (same head/line-weight/palette across cave, forest, night,
+campfire shots), so the mechanism works — but **capability is read per provider INSTANCE**
+(`tools.studio_poc.wants_refs`), not per provider name, and each run logs which mode it used
+(`character consistency: …`). `concept`/`map` shots never pass refs
+(`studio.types.shot_uses_character`). Refs are generated from **our own** prompts
+(`tools/make_refs.py`), rights-clean, never scraped competitor frames.
 
 ## Output spec
 1920×1080, 30 fps, H.264, scene length = its narration audio length (natural sync). Long-form (mid-roll eligible).

@@ -41,7 +41,8 @@ ffmpeg + ffprobe on PATH required. Optional object storage: `docker compose -f d
 │   ├── studio_poc.py          ◀ runnable PoC: providers (PIL/Gemini/Say/Cartesia/FFmpeg) + orchestration
 │   └── make_refs.py           bootstrap the REF-1/REF-2 reference sheets → assets/refs/
 │
-├── assets/refs/               committed channel identity: character.png + expressions.png
+├── assets/refs/               channel identity: character.png + expressions.png — ⚠️ NOT present,
+│                             regenerate via tools/make_refs.py and commit (see architecture.md)
 │
 ├── tests/
 │   └── test_studio.py         studio unit tests (27)

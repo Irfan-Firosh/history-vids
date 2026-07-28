@@ -57,6 +57,8 @@ def test_resume_reuses_existing_frames_and_generates_only_missing(tmp_path, monk
     assert (rec.dir / "img_0.png").read_bytes() == b"ALREADY-DONE"
     assert "img_1.png" in concept.calls
     assert (rec.dir / "video.mp4").is_file()
+    # The run log states the consistency mode plainly (this provider sends no reference image).
+    assert "character consistency: prompt-only" in (rec.dir / "log.txt").read_text()
 
 
 def test_no_resume_regenerates_everything(tmp_path, monkeypatch):
@@ -112,3 +114,19 @@ def test_resume_reuses_saved_narration_and_records_progress(tmp_path, monkeypatc
     assert calls["narration"] == 0  # reused saved narration.wav + spans, no re-synth
     assert "img_1.png" in concept.calls  # only the missing frame generated
     assert rec.manifest.resume_note and "1/2" in rec.manifest.resume_note  # truthful progress
+
+
+def test_ref_capability_is_read_per_instance_not_per_provider_name(monkeypatch):
+    """Agnes only sends a reference image when AGNES_IMG2IMG=1, so ref-capability must come from
+    the instance. A name-based check claimed ref-conditioned consistency for the default Agnes
+    setup and told the user to generate ref sheets it would never use."""
+    monkeypatch.delenv("AGNES_IMG2IMG", raising=False)
+    assert sp.wants_refs(sp.AgnesImageProvider()) is False  # default: text-to-image, refs ignored
+
+    monkeypatch.setenv("AGNES_IMG2IMG", "1")
+    assert sp.wants_refs(sp.AgnesImageProvider()) is True  # opted in → image-to-image
+
+    assert sp.wants_refs(sp.GeminiImageProvider()) is True
+    assert sp.wants_refs(sp.HuggingFaceImageProvider()) is False
+    assert sp.wants_refs(sp.PlaceholderImageProvider()) is False
+    assert sp.wants_refs(_FakeProvider("anything")) is False  # duck-typed → no claim of refs

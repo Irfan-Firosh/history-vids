@@ -6,8 +6,10 @@ Script→images→static hard-cut→voice→assemble runs end-to-end (`tools/stu
 ## Phase 1 — First real, publishable video (~$2.30/video)
 - [x] **Gemini "Nano Banana" images** — `GeminiImageProvider` (REST, 16:9, **ref-conditioned**) in the
       stick-figure cartoon style; each scene prompt carries the **facial expression**. Validated live.
-- [x] **Style consistency** — SOLVED via REF-1/REF-2 reference conditioning (`assets/refs/`,
-      `tools/make_refs.py`); character holds across scenes. No FLUX LoRA needed.
+- [~] **Style consistency** — REF-1/REF-2 reference conditioning works (validated on Gemini), but the
+      ref sheets are MISSING from `assets/refs/` and the recommended Agnes default sends no reference
+      at all, so live runs are **prompt-only**. Regenerate via `tools/make_refs.py` + commit, or accept
+      prompt-only. Each run now logs which mode it used. No FLUX LoRA needed either way.
 - [x] **Cartesia "Carson" voice** — `CartesiaVoiceProvider` verified live in the full run.
 - [ ] `LLMScriptProvider` — generate the storyboard from a topic via an LLM endpoint + **real-citation RAG**.
       Chunk narration into ~5–10s beats → **one image per beat**; assign each scene a `shot_type`.
