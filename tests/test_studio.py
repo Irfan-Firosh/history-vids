@@ -474,6 +474,41 @@ def test_boost_intense_beats_is_capped_and_noop_when_none_flagged():
     assert sum(s["intense"] for s in many) == 8
 
 
+# ── script length sizing (words, not guessed seconds) ──────────────────────────
+def test_target_words_and_estimate_minutes_are_inverses():
+    from tools.make_script import WORDS_PER_MINUTE, estimate_minutes, target_words
+
+    budget = target_words(6.0, 9.0)  # mid-band 7.5 min at the measured rate
+    assert budget == round(7.5 * WORDS_PER_MINUTE)
+    assert 6.0 <= estimate_minutes(budget) <= 9.0  # a script of that size lands inside the band
+
+
+def test_estimate_minutes_matches_a_real_completed_run():
+    # Ground truth from run 20260707-133324: 849 words of narration → 270.2s of Cartesia audio.
+    from tools.make_script import estimate_minutes
+
+    assert abs(estimate_minutes(849) - 270.2 / 60) < 0.3  # within ~18s over a 4.5-minute video
+
+
+def test_scenes_for_minutes_sizes_beats_from_the_word_budget():
+    from tools.make_script import WORDS_PER_BEAT, scenes_for_minutes, target_words
+
+    for lo, hi in ((6.0, 9.0), (3.0, 5.0), (10.0, 12.0)):
+        beats = scenes_for_minutes(lo, hi)
+        assert beats == max(20, round(target_words(lo, hi) / WORDS_PER_BEAT))
+    assert scenes_for_minutes(0.5, 1.0) == 20  # floor holds for tiny bands
+
+
+def test_script_prompt_states_a_countable_word_budget():
+    # The model cannot judge spoken seconds (asking in seconds gave ~19-word beats and a 4.5-min
+    # video for a 6-9 min request), so the request must carry a word budget it can count.
+    out = build_script_user_prompt(
+        "ancient sleep", "[1] a real study", 46, 6.0, 9.0, total_words=1373, words_per_beat=30
+    )
+    assert "1373 words" in out and "30 words per beat" in out
+    assert "6-9 minute" in out  # the human-facing band is still stated
+
+
 def test_frame_prompt_makes_extra_frames_clearly_distinct():
     from tools.studio_poc import _frame_prompt
 
@@ -716,6 +751,24 @@ def test_apply_callout_analysis_degrades_gracefully_on_llm_failure(monkeypatch):
 
     def boom(system, user, temp=None):
         raise LLMError("endpoint down")
+
+    monkeypatch.setattr(prov, "_chat", boom)
+    data = {"scenes": [{"narration": "a"}, {"narration": "b"}]}
+    prov._apply_callout_analysis(data)  # must not raise
+    assert all(s["emphasis"] == "" and s["intense"] is False for s in data["scenes"])
+
+
+def test_apply_callout_analysis_degrades_on_network_error(monkeypatch):
+    # This pass runs AFTER the paid research + script calls, so a transport-level failure (an httpx
+    # timeout is NOT a RuntimeError) must never throw away a run that already has a usable script.
+    import httpx
+
+    from tools.make_script import LLMScriptProvider
+
+    prov = LLMScriptProvider(research=None)
+
+    def boom(system, user, temp=None):
+        raise httpx.ReadTimeout("endpoint hung")
 
     monkeypatch.setattr(prov, "_chat", boom)
     data = {"scenes": [{"narration": "a"}, {"narration": "b"}]}

@@ -68,9 +68,10 @@ SCRIPT_SYSTEM_PROMPT = (
     "NEVER read citations or source names aloud in the narration (keep them only in the JSON `cite` "
     "field). Short, punchy, curious sentences; every line earns the next. You are a fascinated "
     "storyteller, not a professor.\n\n"
-    "SCENES: split the script into beats, where each beat is ONE held shot. Beats are LONGER now — "
-    "aim ~8-16 seconds spoken each (about 2-4 sentences, ~25-55 words); prefer fewer, fuller beats "
-    "over many tiny ones, because each image stays on screen for the whole beat. For each beat provide:\n"
+    "SCENES: split the script into beats, where each beat is ONE held shot. Size beats by WORD "
+    "COUNT, not by feel: every beat must carry about 25-35 words (2-3 full sentences) — roughly "
+    "8-12 seconds spoken. A one-sentence beat is too short; prefer fewer, fuller beats over many "
+    "tiny ones, because each image stays on screen for the whole beat. For each beat provide:\n"
     "  - narration: the spoken line(s) for this beat.\n"
     "  - image_prompt: the visual SUBJECT only; the renderer adds the full art style. Write subjects "
     "that fit a crude hand-drawn marker-cartoon frame like the reference stills: simple 16:9 staging, "
@@ -141,11 +142,24 @@ def build_callout_analysis_user_prompt(beats: list[dict]) -> str:
 def build_script_user_prompt(
     topic: str, research_brief: str, num_scenes: int,
     min_minutes: float = 6.0, max_minutes: float = 9.0,
+    total_words: int | None = None, words_per_beat: int = 30,
 ) -> str:
+    """The per-run script request.
+
+    Length is stated as a **word budget**, not just minutes: the narrator speaks ~183 words/minute,
+    and a model cannot judge spoken seconds but can count words. Asking in seconds produced ~19-word
+    beats and a 4.5-minute video for a 6-9 minute request.
+    """
+    budget = total_words if total_words is not None else round((min_minutes + max_minutes) / 2 * 183)
     return (
         f"TOPIC: {topic}\n"
         f"TARGET: a {min_minutes:g}-{max_minutes:g} minute narration — roughly {num_scenes} beats "
-        f"(each one held shot, ~8-16 seconds spoken). Land inside that time band.\n\n"
+        f"(each one held shot, ~8-16 seconds spoken). Land inside that time band.\n"
+        f"LENGTH BUDGET (hard target — the narrator speaks about 183 words per minute): write "
+        f"about {budget} words of narration IN TOTAL, i.e. about {words_per_beat} words per beat "
+        f"(2-3 full sentences each). Count as you go. A script materially under {budget} words "
+        f"comes out too short and is a failed script — write every beat to full length rather than "
+        f"padding a few, and do not stop early.\n\n"
         f"RESEARCH BRIEF (cite by [n]; use only these facts):\n{research_brief}\n\n"
         f"Write the script now as the JSON object only."
     )

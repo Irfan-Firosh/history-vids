@@ -176,7 +176,10 @@ class LLMScriptProvider:
         num_queries = min(12, max(6, num_scenes // 6))
         queries, sources = self.gather_sources(topic, num_queries, per_query=8)
         brief = format_research_brief(sources)
-        user = build_script_user_prompt(topic, brief, num_scenes, min_minutes, max_minutes)
+        user = build_script_user_prompt(
+            topic, brief, num_scenes, min_minutes, max_minutes,
+            total_words=target_words(min_minutes, max_minutes), words_per_beat=WORDS_PER_BEAT,
+        )
         text = self._chat(SCRIPT_SYSTEM_PROMPT, user)
         data = llm.parse_json_block(text)
         self._apply_callout_analysis(data)  # a focused 2nd pass: pick callouts + flag intense beats
@@ -200,7 +203,11 @@ class LLMScriptProvider:
                 CALLOUT_ANALYSIS_SYSTEM_PROMPT, build_callout_analysis_user_prompt(beats), 0.2
             )
             result = llm.parse_json_block(text)
-        except (llm.LLMError, RuntimeError) as exc:
+        except Exception as exc:  # noqa: BLE001 - see below; this pass must never abort a run
+            # Deliberately broad: this is optional enrichment that runs AFTER the paid research +
+            # script calls, so ANY failure here (an httpx timeout/HTTPStatusError — neither is a
+            # RuntimeError — a garbled JSON reply, anything) must degrade to "no callouts" rather
+            # than throw away a run that already has a usable script. See tasks/lessons.md.
             print(f"  callout analysis skipped ({type(exc).__name__}: {exc})", file=sys.stderr)
             return
         for c in result.get("callouts") or []:
@@ -234,9 +241,37 @@ def _qc_report(data: dict, sources: list[ResearchSource]) -> str:
     return "\n".join(lines)
 
 
-#: ~10s of narration per (longer) beat → beats needed for a target minute band.
-def scenes_for_minutes(min_minutes: float, max_minutes: float, seconds_per_beat: float = 10.0) -> int:
-    return max(20, round((min_minutes + max_minutes) / 2 * 60 / seconds_per_beat))
+#: Measured speaking rate of the production voice (Cartesia ``sonic-2`` at the default
+#: ``CARTESIA_SPEED=0.88``), from two completed runs: 394 words / 132.7s = 178 wpm and
+#: 849 words / 270.2s = 189 wpm. Scale roughly linearly if ``CARTESIA_SPEED`` changes.
+WORDS_PER_MINUTE = 183.0
+
+#: Words of narration per beat. A beat is ONE held shot and ``studio.narration.MIN_FRAME_HOLD``
+#: wants every frame on screen ≥ 8s, so a beat should run ~10s ⇒ ~30 words at WORDS_PER_MINUTE.
+#: The model used to be sized in SECONDS ("~8-16s each") and delivered ~19-word / 6s beats — it
+#: cannot judge spoken duration, but it can count words, so all sizing now goes through words.
+WORDS_PER_BEAT = 30
+
+
+def target_words(min_minutes: float, max_minutes: float, wpm: float = WORDS_PER_MINUTE) -> int:
+    """Total narration words needed to land in the middle of a target minute band."""
+    return round((min_minutes + max_minutes) / 2 * wpm)
+
+
+def estimate_minutes(word_count: int, wpm: float = WORDS_PER_MINUTE) -> float:
+    """Spoken minutes a script of ``word_count`` words will produce at the measured rate."""
+    return word_count / wpm if wpm > 0 else 0.0
+
+
+def scenes_for_minutes(
+    min_minutes: float, max_minutes: float, words_per_beat: int = WORDS_PER_BEAT
+) -> int:
+    """Beats needed for a target minute band = total word budget / words per beat.
+
+    Derived from the MEASURED speaking rate rather than an assumed seconds-per-beat constant (the
+    old 10s/beat guess produced a 4.5-minute video for a 6-9 minute request).
+    """
+    return max(20, round(target_words(min_minutes, max_minutes) / max(1, words_per_beat)))
 
 
 def build_and_save(
@@ -250,11 +285,22 @@ def build_and_save(
     line-logger (``print`` or ``RunRecorder.log``) so progress shows up wherever the caller wants it.
     """
     scenes = scenes or scenes_for_minutes(min_minutes, max_minutes)
+    budget = target_words(min_minutes, max_minutes)
     provider = LLMScriptProvider(ExaResearchProvider())
     log(f"researching topic {topic!r} · model={provider.model} · "
-        f"target {min_minutes:g}-{max_minutes:g} min (~{scenes} beats)")
+        f"target {min_minutes:g}-{max_minutes:g} min (~{scenes} beats, ~{budget} words)")
     storyboard, sources, data = provider.generate(topic, scenes, min_minutes, max_minutes)
-    log(f"gathered {len(sources)} real sources · script has {len(storyboard.scenes)} scenes")
+
+    # Length check BEFORE any image/TTS spend: words are the only length signal available at this
+    # stage, so measure them against the band and say plainly whether the script will land in it.
+    words = sum(len(s.narration.split()) for s in storyboard.scenes)
+    est = estimate_minutes(words)
+    verdict = "on target" if min_minutes <= est <= max_minutes else "OFF TARGET"
+    log(f"gathered {len(sources)} real sources · script has {len(storyboard.scenes)} scenes · "
+        f"{words} words ≈ {est:.1f} min ({verdict} for {min_minutes:g}-{max_minutes:g} min)")
+    if est < min_minutes:
+        log(f"  ⚠ script is ~{min_minutes - est:.1f} min short of the band — the render will be "
+            f"under length; re-run or raise --min-minutes if that matters")
 
     out = OUT_DIR / _slug(topic)
     out.mkdir(parents=True, exist_ok=True)
