@@ -1,3 +1,42 @@
+# Todo — codebase review + first improvement pass (2026-07-28)
+
+Full read of the repo, then the four highest-value fixes. 173 tests pass, ruff clean.
+
+- [x] **Git** — the repo had ZERO commits; ~6.4k lines were untracked. Baseline committed
+      (no secrets: `.env` ignored, 1.2 MB total), then one commit per fix.
+- [x] **Script length** — a 6-9 min request rendered 4.5 min. Two completed runs measure
+      **183 words/min** and **~19 words/beat** (the model was asked for 8-16 *seconds*/beat, which
+      it cannot judge). Sizing now goes through words: `WORDS_PER_MINUTE` / `WORDS_PER_BEAT`,
+      `target_words`, `estimate_minutes`; the prompt states a hard total word budget; `build_and_save`
+      reports measured words vs the band **before** any image/TTS spend.
+- [x] **Callout pass robustness** — it ran after the paid research + script calls but caught only
+      `(LLMError, RuntimeError)`; an httpx timeout is neither, so a flaky second pass binned a run
+      that already had a usable script. Now degrades to "no callouts" on any failure.
+- [x] **Reference conditioning honesty** — `REF_CAPABLE` was name-based, but Agnes only sends a
+      reference with `AGNES_IMG2IMG=1`. Capability is now per-instance (`wants_refs`), every run logs
+      the consistency mode, and the docs stop claiming ref-conditioning is live.
+      **`assets/refs/character.png` + `expressions.png` are missing** → regenerate + commit.
+- [x] `numpy` was imported directly but only installed transitively via matplotlib → declared.
+
+## Not done / next (from the review, in value order)
+- [ ] **Verify the length fix on a live run** — the word budget only helps if gpt-oss obeys it.
+      If it still writes ~19-word beats, add a one-shot "extend the thin beats" pass.
+- [ ] **Parallel image generation** — ~55 frames serial at a 3s RPM floor ≈ 20-30 min/video.
+      A bounded worker pool inside the same RPM budget is the biggest wall-clock win.
+- [ ] **Split `tools/studio_poc.py`** (1,319 lines: 5 image providers + voice + PIL + FFmpeg + CLI).
+- [ ] **Anchor callouts to real word timestamps** — `emphasis_timeline` still estimates by character
+      offset; the word times are already fetched for beat alignment.
+- [ ] **Dashboard `_active` is in-memory** — a server restart loses it while detached renders keep
+      running, so Resume/Approve can double-spawn against a live job.
+- [ ] QC gate (citation range check + AIGC disclosure) · publisher.
+
+## Environment (blocking — this machine cannot run the pipeline yet)
+`uv` is not installed, `ffmpeg`/`ffprobe` are not installed, and `.venv/` is stale: it was built
+under `/Users/irfanfirosh` against `/opt/anaconda3`, both of which are gone, so its console scripts
+point at a python that does not exist. See the run instructions in the session notes.
+
+---
+
 # Todo — callout placement + art-style refresh (2026-07-04)
 
 User asks (post-compact):
