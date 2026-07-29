@@ -32,6 +32,7 @@ local/cheap images + Cartesia) → hugely positive unit economics. Long-form = m
 ## Files
 - [architecture.md](architecture.md) — the Tier-0 pipeline, provider seams, stack tiers (instantiates template 02/03/06)
 - [roadmap.md](roadmap.md) — build phases (instantiates template 07)
+- [art-style-analysis.md](art-style-analysis.md) — **frame-grounded study of Axen + the 4 closest clones vs. our own rendered output** (2026-07-29): measured palette/line-density/cut-rate baselines, the reference visual system, and where our frames diverge. Key finding: art quality has a floor but no view-converting ceiling in this niche
 - [blueprints/gemini-image-provider.md](blueprints/gemini-image-provider.md) — **the image-stage design** (Gemini seam, ref workflow, cost, error handling) + optimized execution prompt
 - [image-tool-testing.md](image-tool-testing.md) — image-generator bake-off notes (winner: **Gemini**; archived — decision made)
 - [`prompts/`](../../prompts/) — content-generation kit (01 script · 02 image prompts · 03 Cartesia voiceover · **04 Gemini reference images**)
