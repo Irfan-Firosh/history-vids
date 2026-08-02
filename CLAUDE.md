@@ -112,6 +112,65 @@ Rule: if a matching `ecc:*` skill exists for what you're about to do, invoke it 
 1. **Inital**: alway make the project a git project always make sure u get the correct project.
 2. *Pre Commit**: Make sure that you always check for bug using coderabbit before commits.
 
+## Planning Architecture
+
+Work flows **research → spec → plan → phases → tasks → TDD steps**. Each stage has one home and
+one gate. Do not skip forward: a plan without a spec, or a spec without evidence, is a guess.
+
+### Where artifacts live
+
+| Artifact | Path | Written by |
+|---|---|---|
+| Research findings | `context/research/YYYY-MM-DD/NN-<topic>.md` | parallel subagents; one file per domain |
+| Design spec | `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md` | `superpowers:brainstorming` |
+| Implementation plan | `docs/superpowers/plans/YYYY-MM-DD-<feature>.md` | `superpowers:writing-plans` |
+| Durable project state | `context/project/` | decisions that outlive one feature |
+| Measured targets | `context/project/*.json` | numbers only — never competitor media |
+| Session todo | `tasks/todo.md` | in-flight checklist + review section |
+| Lessons | `tasks/lessons.md` | after ANY correction, dated, with the rule |
+
+### Plan structure
+
+Plans are organised into **phases**, each ending in working, testable software that could ship
+alone. Within a phase, a **task** is the smallest unit carrying its own test cycle — the unit a
+reviewer could reject without rejecting its neighbour. Within a task, every **step** is one 2–5
+minute action, and code steps contain real runnable code, never a description of code.
+
+Every plan opens with a **Global Constraints** block: version floors, lint rules, layer rules, and
+domain invariants copied verbatim from the spec. Every task implicitly inherits it.
+
+Order dependencies explicitly. If two phases must land together, say so and say why.
+
+### Layer separation (this repo's core invariant)
+
+- `studio/` — **pure**. No file I/O, no network, no `subprocess`. Frozen pydantic models. This is
+  what makes the logic fast to test and safe to reason about.
+- `tools/` — side-effecting: providers, ffmpeg, orchestration, CLIs.
+- `dashboard/` — FastAPI control plane; spawns detached subprocesses, never does pipeline work.
+
+A new module goes in `studio/` if it can. Reach for `tools/` only when it genuinely touches the
+outside world.
+
+### Gates
+
+- **Gates run immediately before the spend they protect**, not after. Checking output quality after
+  paying for 208 images tells you too late.
+- **A prompt rule is not a guarantee.** Any rule whose violation is expensive (a paid render) or
+  audible (TTS) needs a deterministic check in code at the last boundary before the cost.
+- **Calibrate before enforcing.** Replay a new threshold over the real corpus on disk and show it
+  refuses the known-bad and passes the known-good. A threshold you haven't replayed is a guess.
+- **Gates are escapable by an informed operator** (`--skip-*`), never by accident.
+
+### Evidence standards
+
+- **Measure, don't assert.** A claim about performance, cost, or behaviour needs a number you
+  produced. Benchmark before declaring something a bottleneck.
+- **Cite `file.py:line`** for claims about this codebase.
+- **Label estimates as estimates.** Distinguish SOURCED from ESTIMATE in research.
+- **When two sources conflict, prefer the one holding the raw data**, and record which lost and why.
+- **Correct the record in place.** When research invalidates a documented claim, fix the document —
+  a stale claim in `context/project/` will be believed.
+
 ## Core Principles
 
 - **Simplicity First**: Make every change as simple as possible. Impact minimal code.
