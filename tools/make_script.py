@@ -23,7 +23,13 @@ sys.path.insert(0, str(_ROOT))
 from dotenv import load_dotenv  # noqa: E402
 
 from studio import format_research_brief, llm, storyboard_from_dict  # noqa: E402
-from studio.research import ResearchSource  # noqa: E402
+from studio.research import (  # noqa: E402
+    MIN_CITATION_COVERAGE,
+    MIN_SOURCES,
+    ResearchSource,
+    grounding_report,
+    strip_citation_markers,
+)
 from studio.script_prompt import (  # noqa: E402
     CALLOUT_ANALYSIS_SYSTEM_PROMPT,
     QUERY_SYSTEM_PROMPT,
@@ -97,7 +103,11 @@ class ExaResearchProvider:
         sources: list[ResearchSource] = []
         for r in resp.json().get("results", []):
             highlights = r.get("highlights") or []
-            snippet = " ".join(highlights) if highlights else (r.get("text") or "")
+            # Highlights are NON-CONTIGUOUS excerpts from different parts of a page. Joined with a
+            # bare space they read as one continuous passage, and the model can infer a causal or
+            # temporal link across the seam that no source actually makes — then cite [n] for it,
+            # which looks verified. The ellipsis marks the gap.
+            snippet = " … ".join(highlights) if highlights else (r.get("text") or "")
             sources.append(
                 ResearchSource(
                     title=r.get("title") or "(untitled)",
@@ -159,11 +169,21 @@ class LLMScriptProvider:
 
     def gather_sources(self, topic: str, num_queries: int = 6, per_query: int = 8):
         text = self._chat(QUERY_SYSTEM_PROMPT, build_query_user_prompt(topic, num_queries), 0.3)
-        queries = llm.parse_json_block(text).get("queries", [])[:num_queries]
+        raw = llm.parse_json_block(text).get("queries", [])[:num_queries]
+        queries = [q for q in raw if isinstance(q, str) and q.strip()]
         seen: set[str] = set()
         sources: list[ResearchSource] = []
         for q in queries:
-            for src in self.research.search(q, per_query):
+            try:
+                results = self.research.search(q, per_query)
+            except Exception as exc:  # noqa: BLE001 - one flaky query must not sink the run
+                # The search API is rate-limited and flaky; a 429 on query 5 of 7 used to discard
+                # four queries' worth of good sources AND the paid query-generation call. Skip the
+                # query, keep what we have — the grounding gate below catches a thin haul properly.
+                print(f"  research query skipped ({type(exc).__name__}: {exc}): {q!r}",
+                      file=sys.stderr)
+                continue
+            for src in results:
                 if src.url and src.url not in seen:
                     seen.add(src.url)
                     sources.append(src)
@@ -182,6 +202,10 @@ class LLMScriptProvider:
         )
         text = self._chat(SCRIPT_SYSTEM_PROMPT, user)
         data = llm.parse_json_block(text)
+        # Strip inline [n] markers BEFORE the callout pass and before anything is written to disk:
+        # the callout pass must not pick a marker as an on-screen phrase, and storyboard.json/qc.md
+        # should carry the same clean narration the TTS will speak.
+        _strip_inline_citations(data)
         self._apply_callout_analysis(data)  # a focused 2nd pass: pick callouts + flag intense beats
         storyboard = storyboard_from_dict(data)
         return storyboard, sources, data
@@ -218,6 +242,27 @@ class LLMScriptProvider:
             if isinstance(i, int) and 0 <= i < len(scenes):
                 scenes[i]["intense"] = True
         _boost_intense_beats(scenes)  # ~1.5x more fire spots than the pass picks (user request)
+
+
+def _strip_inline_citations(data: dict) -> int:
+    """Remove ``[n]`` markers from every beat's narration in place; fold the indices into ``cite``.
+
+    Returns the number of beats cleaned. The script prompt forbids these outright, but a shipped
+    run still had them in 16 of 45 beats and the TTS spoke every one — so the writer fixes it
+    deterministically rather than trusting the instruction.
+    """
+    cleaned = 0
+    for scene in data.get("scenes") or []:
+        if not isinstance(scene, dict):
+            continue
+        narration, inline = strip_citation_markers(scene.get("narration") or "")
+        if not inline:
+            continue
+        scene["narration"] = narration
+        cites = list(scene.get("cite") or ())
+        scene["cite"] = cites + [n for n in inline if n not in cites]
+        cleaned += 1
+    return cleaned
 
 
 def _slug(text: str) -> str:
@@ -301,6 +346,25 @@ def build_and_save(
     if est < min_minutes:
         log(f"  ⚠ script is ~{min_minutes - est:.1f} min short of the band — the render will be "
             f"under length; re-run or raise --min-minutes if that matters")
+
+    # Grounding check, also BEFORE any image/TTS spend. The whole point of the research stage is
+    # that cited facts are real; the prompt asks for that but nothing used to verify it, so a
+    # script citing 3 of 54 sources across 44 beats rendered end to end silently. Measure, then
+    # refuse — this costs nothing and runs before the expensive half of the pipeline.
+    report = grounding_report((s.cite for s in storyboard.scenes), len(sources))
+    log(f"grounding: {report.summary()}")
+    if not report.ok:
+        raise RuntimeError(
+            f"script is not grounded in the research ({report.summary()}); refusing to render. "
+            f"Need ≥{MIN_SOURCES} sources and ≥{MIN_CITATION_COVERAGE:.0%} of beats cited. "
+            f"Re-run the topic — this is usually a thin research haul or a model that ignored "
+            f"the brief."
+        )
+    if report.thin:
+        log(f"  ⚠ thin grounding — {report.coverage:.0%} of beats carry a citation; spot-check "
+            f"qc.md before approving the render")
+    if report.out_of_range:
+        log(f"  ⚠ script cited sources that do not exist: {list(report.out_of_range)}")
 
     out = OUT_DIR / _slug(topic)
     out.mkdir(parents=True, exist_ok=True)

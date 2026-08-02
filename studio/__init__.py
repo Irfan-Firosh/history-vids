@@ -21,7 +21,14 @@ from studio.narration import (
     frames_for_span,
     image_timeline,
 )
-from studio.research import ResearchProvider, ResearchSource, format_research_brief
+from studio.research import (
+    GroundingReport,
+    ResearchProvider,
+    ResearchSource,
+    format_research_brief,
+    grounding_report,
+    strip_citation_markers,
+)
 from studio.run_log import RunManifest, RunRecorder, SceneRecord, new_run_id
 from studio.storyboard import DEMO_STORYBOARD, storyboard_from_dict
 from studio.style import CONCEPT_STYLE, LOCKED_STYLE, styled_prompt, thumbnail_prompt
@@ -41,7 +48,10 @@ __all__ = [
     "VoiceProvider",
     "ResearchProvider",
     "ResearchSource",
+    "GroundingReport",
     "format_research_brief",
+    "grounding_report",
+    "strip_citation_markers",
     "LOCKED_STYLE",
     "CONCEPT_STYLE",
     "styled_prompt",

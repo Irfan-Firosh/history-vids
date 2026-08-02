@@ -291,3 +291,24 @@ edits show up with no restart. When a user says "my UI change isn't showing," fi
 server process predates the file edit (`ps -o lstart` vs file mtime) and diff the SERVED bytes
 (`curl / | grep token`) against disk before hunting for a logic bug. Verify the data path end-to-end
 (disk → API JSON → rendered DOM) rather than re-reading the component.
+
+## 2026-07-29 — Grounding that is *instructed* but never *verified* is not grounding
+**Bug (review of the Exa→LLM script path):** `SCRIPT_SYSTEM_PROMPT` says "use ONLY facts from the
+RESEARCH BRIEF… NEVER invent" and "never read citations aloud". Both rules were prompt-only, so both
+failed silently in production. Measured on the 13 shipped runs: `the-sailor-who-survived-three-
+different-shipwrecks` is a 44-beat script citing **3 of 54** sources with 34 uncited beats — it
+rendered end to end with no warning. And `chinese-boys-in-the-1800s` had `[2][5]` inline in 16 of 45
+narration beats, which Cartesia read aloud to the viewer.
+**Rule:** any prompt rule whose violation is expensive (paid render) or audible (TTS) needs a
+deterministic check in code, placed at the last boundary before the cost is incurred. Concretely:
+(1) a **grounding gate** (`studio.research.grounding_report`) runs in `build_and_save` next to the
+existing word-count check — *before* any image/TTS spend — and raises below a source floor or a
+citation-coverage floor; (2) `strip_citation_markers` runs in `storyboard_from_dict`, the one
+boundary every render path funnels through, so storyboards already on disk are fixed too, with
+stripped indices folded back into `cite` so provenance is never lost.
+**Also:** untrusted fetched text is *data, not instructions* — whitespace-normalise every field
+(6 of 604 real Exa titles carry embedded newlines that broke the `[n] title/url/snippet` contract and
+could forge a fake source), fence it (`<research_brief>`), and say so in the system prompt.
+**Verify tip:** calibrate a new gate against the real corpus on disk before shipping it. Replaying all
+13 runs showed it refuses exactly the one broken run, flags 3 as thin, and passes 9 — proof it catches
+the failure without blocking good work. A threshold you haven't replayed is a guess.

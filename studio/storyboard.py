@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import sys
 
+from studio.research import strip_citation_markers
 from studio.style import LOCKED_STYLE
 from studio.types import Scene, Storyboard
 
@@ -73,6 +74,11 @@ def storyboard_from_dict(data: dict, default_style: str = LOCKED_STYLE) -> Story
     beat that isn't a dict with both required fields (a beat with no image can't be rendered and one
     with no narration has no audio), keep the rest, and warn to stderr so the data-quality dip is
     visible rather than silent. If nothing usable survives we still fail loudly.
+
+    Inline ``[n]`` citation markers are stripped from every narration here, at the last boundary
+    before the text becomes audio — the TTS reads whatever it is handed, and storyboards already on
+    disk carry markers the model emitted before the writer stripped them. Stripped indices are
+    merged into ``cite`` so provenance survives.
     """
     raw_scenes = data.get("scenes")
     if not isinstance(raw_scenes, list) or not raw_scenes:
@@ -80,17 +86,19 @@ def storyboard_from_dict(data: dict, default_style: str = LOCKED_STYLE) -> Story
     scenes: list[Scene] = []
     dropped = 0
     for s in raw_scenes:  # a legacy "cutaways" key, if present, is simply ignored
-        narration = (s.get("narration") or "").strip() if isinstance(s, dict) else ""
+        raw_narration = (s.get("narration") or "").strip() if isinstance(s, dict) else ""
         image_prompt = (s.get("image_prompt") or "").strip() if isinstance(s, dict) else ""
+        narration, inline_cites = strip_citation_markers(raw_narration)
         if not narration or not image_prompt:  # partial/garbled beat from the LLM → skip it
             dropped += 1
             continue
+        cites = tuple(s.get("cite") or ())
         scenes.append(
             Scene(
                 narration=narration,
                 image_prompt=image_prompt,
                 shot_type=s.get("shot_type") or "character",
-                cite=tuple(s.get("cite") or ()),
+                cite=cites + tuple(n for n in inline_cites if n not in cites),
                 emphasis=(s.get("emphasis") or "").strip(),
                 intense=bool(s.get("intense", False)),
                 motion="static",
