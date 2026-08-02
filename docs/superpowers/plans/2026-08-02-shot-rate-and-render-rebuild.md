@@ -75,8 +75,6 @@ Expected: a line containing `subtitles`. Record the path — it is `FFMPEG_BIN` 
 
 ```python
 # tests/test_render_ffmpeg.py
-import os
-import pytest
 from tools.render import ffmpeg
 
 
@@ -806,7 +804,6 @@ Record the pass count for the 13 existing scripts — that is the honest baselin
 
 ```python
 # tests/test_studio.py  (append)
-import pytest
 from studio.script_rubric import score_script
 
 
@@ -1255,7 +1252,6 @@ git commit -m "feat: generate .ass subtitles instead of per-cue PNG overlays"
 
 ```python
 # tests/test_render_segments.py
-import pytest
 from tools.render.segments import CACHE_VERSION, segment_key
 
 
