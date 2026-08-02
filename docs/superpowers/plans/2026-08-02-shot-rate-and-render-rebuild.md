@@ -62,7 +62,7 @@ The machine's default `ffmpeg` 8.1.2 has **no libass, libfreetype, or drawtext**
   - `has_filter(name: str, *, bin_path: str | None = None) -> bool`
   - `subtitle_backend(*, bin_path: str | None = None) -> str` — `"libass"` or `"png_overlay"`
 
-- [ ] **Step 1: Install the libass-capable binary**
+- [x] **Step 1: Install the libass-capable binary**
 
 ```bash
 brew install ffmpeg-full
@@ -71,7 +71,7 @@ brew install ffmpeg-full
 
 Expected: a line containing `subtitles`. Record the path — it is `FFMPEG_BIN` for later phases.
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 ```python
 # tests/test_render_ffmpeg.py
@@ -103,12 +103,12 @@ def test_subtitle_backend_is_one_of_the_two_known_values():
     assert ffmpeg.subtitle_backend() in {"libass", "png_overlay"}
 ```
 
-- [ ] **Step 3: Run to verify failure**
+- [x] **Step 3: Run to verify failure**
 
 Run: `uv run pytest tests/test_render_ffmpeg.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'tools.render'`
 
-- [ ] **Step 4: Implement**
+- [x] **Step 4: Implement**
 
 ```python
 # tools/render/__init__.py
@@ -169,12 +169,12 @@ def subtitle_backend(*, bin_path: str | None = None) -> str:
     return "libass" if has_filter(_SUBTITLE_FILTER, bin_path=bin_path) else "png_overlay"
 ```
 
-- [ ] **Step 5: Run tests and lint**
+- [x] **Step 5: Run tests and lint**
 
 Run: `uv run pytest tests/test_render_ffmpeg.py -v && uv run ruff check .`
 Expected: 5 passed, ruff clean
 
-- [ ] **Step 6: Verify and commit**
+- [x] **Step 6: Verify and commit**
 
 ```bash
 git add tools/render/__init__.py tools/render/ffmpeg.py tests/test_render_ffmpeg.py
