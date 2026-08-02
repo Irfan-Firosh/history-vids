@@ -110,7 +110,9 @@ Rule: if a matching `ecc:*` skill exists for what you're about to do, invoke it 
 
 ## GITHUB MANAGEMENT
 1. **Inital**: alway make the project a git project always make sure u get the correct project.
-2. *Pre Commit**: Make sure that you always check for bug using coderabbit before commits.
+2. **Pre Commit**: Before every commit run `uv run pytest -q` and `uv run ruff check .`, then
+   invoke `superpowers:verification-before-completion`. For non-trivial changes also invoke
+   `superpowers:requesting-code-review`. Never claim a task done on unrun tests.
 
 ## Planning Architecture
 

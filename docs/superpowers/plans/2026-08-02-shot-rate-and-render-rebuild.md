@@ -20,7 +20,7 @@
 - **Never commit competitor media.** Frames/clips/thumbnails stay in scratch. Measured *numbers* may be committed.
 - **No motion.** The reference measured 0% camera moves, 0% character animation, 0% dissolves. Do not add Ken Burns, zoompan, crossfades, or any tween. `studio/kenburns.py` stays unreachable by design.
 - **Commit format:** `<type>: <description>` (feat, fix, refactor, docs, test, chore, perf, ci). No attribution trailer.
-- **Pre-commit:** run `coderabbit review --uncommitted` before each commit and address findings.
+- **Pre-commit:** run `uv run pytest -q` and `uv run ruff check .`; then invoke `superpowers:verification-before-completion` before claiming a task done.
 - **Reference targets (Axen pole, from `context/research/2026-08-01/04-video-forensics.md`):** median shot 2.2 s (p10 0.9 / p90 4.6), 16–18 cuts/min, ≥94.6% frozen runtime, 9–11 narration words per image, 196 wpm, dry VO with no music bed.
 
 **Spec:** `docs/superpowers/specs/2026-08-02-shot-rate-and-render-rebuild-design.md`
@@ -174,10 +174,9 @@ def subtitle_backend(*, bin_path: str | None = None) -> str:
 Run: `uv run pytest tests/test_render_ffmpeg.py -v && uv run ruff check .`
 Expected: 5 passed, ruff clean
 
-- [ ] **Step 6: Review and commit**
+- [ ] **Step 6: Verify and commit**
 
 ```bash
-coderabbit review --uncommitted
 git add tools/render/__init__.py tools/render/ffmpeg.py tests/test_render_ffmpeg.py
 git commit -m "feat: select ffmpeg binary and probe subtitle capability"
 ```
@@ -363,10 +362,9 @@ cues = caption_timeline(
 ) if captions else []
 ```
 
-- [ ] **Step 6: Review and commit**
+- [ ] **Step 6: Verify and commit**
 
 ```bash
-coderabbit review --uncommitted
 git add studio/narration.py studio/captions.py studio/__init__.py tools/studio_poc.py tests/test_studio.py
 git commit -m "fix: anchor caption cues to real spoken word times"
 ```
@@ -479,10 +477,9 @@ Expected: 201 passed, ruff clean
 
 In `dashboard/app.py`, `_spawn_run` writes `RunSettings` onto the manifest at start. `rerun_run` and `resume_run` read `manifest["settings"]["captions"]` (defaulting to `True` when absent) instead of assuming the default, and delete the now-inaccurate comment at line 328.
 
-- [ ] **Step 6: Review and commit**
+- [ ] **Step 6: Verify and commit**
 
 ```bash
-coderabbit review --uncommitted
 git add studio/run_log.py dashboard/app.py tests/test_run_log.py tests/test_dashboard.py
 git commit -m "feat: persist run settings and stats on the manifest"
 ```
@@ -724,10 +721,9 @@ Export `score_script`, `RubricReport` from `studio/__init__.py`.
 Run: `uv run pytest tests/test_script_rubric.py -v && uv run ruff check .`
 Expected: 6 passed, ruff clean
 
-- [ ] **Step 5: Review and commit**
+- [ ] **Step 5: Verify and commit**
 
 ```bash
-coderabbit review --uncommitted
 git add studio/script_rubric.py studio/__init__.py tests/test_script_rubric.py
 git commit -m "feat: numeric script rubric derived from an age-controlled cohort"
 ```
@@ -854,11 +850,10 @@ In `tools/make_script.py`, directly after the existing grounding gate block (whi
 Add `skip_rubric: bool = False` to the `build_and_save` signature, an `--skip-rubric` argparse flag,
 and the `score_script` import.
 
-- [ ] **Step 6: Run the full suite, review and commit**
+- [ ] **Step 6: Run the full suite, verify and commit**
 
 ```bash
 uv run pytest -q && uv run ruff check .
-coderabbit review --uncommitted
 git add tools/calibrate_rubric.py tools/make_script.py tests/test_studio.py tasks/lessons.md
 git commit -m "feat: gate renders on a calibrated script-craft rubric"
 ```
@@ -1085,10 +1080,9 @@ Export `Shot`, `plan_shots`, `split_clauses` from `studio/__init__.py`.
 Run: `uv run pytest tests/test_shots.py -v && uv run ruff check .`
 Expected: 7 passed, ruff clean
 
-- [ ] **Step 5: Review and commit**
+- [ ] **Step 5: Verify and commit**
 
 ```bash
-coderabbit review --uncommitted
 git add studio/shots.py studio/__init__.py tests/test_shots.py
 git commit -m "feat: clause-aware shot planning at the measured reference rate"
 ```
@@ -1235,10 +1229,9 @@ def build_ass(
 Run: `uv run pytest tests/test_subtitles.py -v && uv run ruff check .`
 Expected: 4 passed, ruff clean
 
-- [ ] **Step 5: Review and commit**
+- [ ] **Step 5: Verify and commit**
 
 ```bash
-coderabbit review --uncommitted
 git add studio/subtitles.py tests/test_subtitles.py
 git commit -m "feat: generate .ass subtitles instead of per-cue PNG overlays"
 ```
@@ -1357,10 +1350,9 @@ def render_segment(
 Run: `uv run pytest tests/test_render_segments.py -v && uv run ruff check .`
 Expected: 3 passed, ruff clean
 
-- [ ] **Step 5: Review and commit**
+- [ ] **Step 5: Verify and commit**
 
 ```bash
-coderabbit review --uncommitted
 git add tools/render/segments.py tests/test_render_segments.py
 git commit -m "feat: content-hash cached per-shot segment renderer"
 ```
@@ -1513,10 +1505,9 @@ def assemble(
 Run: `uv run pytest tests/test_render_assemble.py -v && uv run ruff check .`
 Expected: 3 passed, ruff clean
 
-- [ ] **Step 5: Review and commit**
+- [ ] **Step 5: Verify and commit**
 
 ```bash
-coderabbit review --uncommitted
 git add tools/render/assemble.py tests/test_render_assemble.py
 git commit -m "feat: concat-and-burn assembler replacing the single-pass filtergraph"
 ```
@@ -1625,10 +1616,9 @@ unreachable by design, per the no-motion constraint.
 Run: `uv run pytest -q && uv run ruff check .`
 Expected: all green. Update `tests/test_resume.py` where it asserted on the old assembler.
 
-- [ ] **Step 5: Review and commit**
+- [ ] **Step 5: Verify and commit**
 
 ```bash
-coderabbit review --uncommitted
 git add tests/ tools/studio_poc.py
 git commit -m "refactor: assemble videos segment-wise instead of one filtergraph"
 ```
@@ -1789,10 +1779,9 @@ def conforms(metrics: FrameMetrics, envelope: Envelope) -> tuple[bool, tuple[str
 Run: `uv run pytest tests/test_style_metrics.py -v && uv run ruff check .`
 Expected: 3 passed, ruff clean
 
-- [ ] **Step 5: Review and commit**
+- [ ] **Step 5: Verify and commit**
 
 ```bash
-coderabbit review --uncommitted
 git add studio/style_metrics.py context/project/style-envelope.json tests/test_style_metrics.py
 git commit -m "feat: measure frame style against the reference envelope"
 ```
@@ -1900,11 +1889,10 @@ In `tools/studio_poc.py::render_storyboard`, before the main image loop, generat
 image, measure it, and abort if it is outside the envelope — unless `--skip-style-check` is passed.
 Checking after 208 images tells you the art drifted only once you have paid for it.
 
-- [ ] **Step 4: Review and commit**
+- [ ] **Step 4: Verify and commit**
 
 ```bash
 uv run pytest -q && uv run ruff check .
-coderabbit review --uncommitted
 git add tools/style_check.py tools/studio_poc.py
 git commit -m "feat: style probe CLI and pre-flight gate before the image loop"
 ```
@@ -1992,11 +1980,10 @@ class TokenBucket:
 each request, replacing the per-instance `min_interval` sleep. The image loop in `render_storyboard`
 becomes a `ThreadPoolExecutor(max_workers=6)` over shots, preserving output ordering by index.
 
-- [ ] **Step 5: Run tests, review, commit**
+- [ ] **Step 5: Run tests, verify, commit**
 
 ```bash
 uv run pytest -q && uv run ruff check .
-coderabbit review --uncommitted
 git add studio/rate_limit.py tools/studio_poc.py tests/test_rate_limit.py
 git commit -m "perf: pipeline image generation behind one shared rate limiter"
 ```
@@ -2025,10 +2012,9 @@ to record what was tested and rejected.
 Run: `uv run python tools/style_check.py --batch 4`
 Expected: `edge_density` closer to the reference; no regression in saturation or colour bins.
 
-- [ ] **Step 4: Review and commit**
+- [ ] **Step 4: Verify and commit**
 
 ```bash
-coderabbit review --uncommitted
 git add studio/agnes.py
 git commit -m "fix: generate frames at native render resolution instead of upscaling"
 ```
@@ -2094,11 +2080,10 @@ uv run python tools/conformance.py result/axen/poc/runs/<latest>/video.mp4
 
 Expected: `cuts_per_min` in 16–18, `frozen_pct` ≥ 94.6, median shot in 0.9–4.6.
 
-- [ ] **Step 5: Review and commit**
+- [ ] **Step 5: Verify and commit**
 
 ```bash
 uv run pytest -q && uv run ruff check .
-coderabbit review --uncommitted
 git add tools/conformance.py tests/test_conformance.py
 git commit -m "test: acceptance check measuring our output against the reference"
 ```

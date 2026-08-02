@@ -65,7 +65,7 @@ User asks (post-compact):
 - **Dashboard**: new "Planned callouts (N)" list — text · scene # · frame 1 · timestamp.
 - **Art style**: reversed ligne claire → refined stick-figure (round white head, thin black body,
   minimal face, serious explainer tone) for consistency + fewer garbled frames.
-- ruff clean · 130 tests pass · NOT committed (awaiting user + CodeRabbit).
+- ruff clean · 130 tests pass. (Committed since, in the 2026-07/08 series; suite now at 196.)
 
 ---
 
