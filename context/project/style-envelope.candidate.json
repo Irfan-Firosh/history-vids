@@ -1,0 +1,36 @@
+{
+  "_status": "CANDIDATE \u2014 NOT IN USE. Kept so the measurement is not lost if it is needed later.",
+  "_provenance": {
+    "method": "p05/p50/p95 of studio.style_metrics.measure_frame over 800 frames sampled uniformly at random (seed 11) from assets/refs/frame_*.jpg. Numbers only; no competitor media committed.",
+    "measured": "2026-08-03",
+    "sample_frames": 800,
+    "corpus_frames": 18709,
+    "why_it_is_only_a_candidate": "Two unresolved problems. Provenance: assets/refs dates to 2026-07-07 and nothing in this repo generates it, so which video or channel these frames are from cannot be verified. Discrimination: per-frame variance is enormous (colour_bins 16 to 72 on this same corpus), so a p05/p95 band admits almost anything. Promote this to the live envelope ONLY after establishing provenance and showing it refuses known-bad frames.",
+    "reproduce": "see the measurement block in this file's git history; seed 11, 800 frames"
+  },
+  "saturation": {
+    "p05": 0.0547,
+    "p50": 0.2154,
+    "p95": 0.5072
+  },
+  "near_white_pct": {
+    "p05": 2.5,
+    "p50": 45.35,
+    "p95": 89.16
+  },
+  "colour_bins": {
+    "p05": 29,
+    "p50": 50,
+    "p95": 81
+  },
+  "edge_density": {
+    "p05": 3.753,
+    "p50": 8.488,
+    "p95": 13.239
+  },
+  "brightness": {
+    "p05": 0.4915,
+    "p50": 0.7962,
+    "p95": 0.954
+  }
+}
