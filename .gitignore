@@ -60,3 +60,6 @@ logs/
 result/axen/style_refs/
 # extracted reference-video frames (study only — heavy, not committed)
 assets/refs/frame_*.jpg
+
+# Agent worktrees — transient, never committed, and must not be linted from the main checkout
+.claude/
