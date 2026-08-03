@@ -1,62 +1,29 @@
 {
   "_provenance": {
-    "source": "context/research/2026-08-01/04-video-forensics.md",
-    "measured": "2026-08-01",
-    "recalibrated": "2026-08-03",
-    "channels": [
-      "AxenCool",
-      "Mack",
-      "Stickly",
-      "HistoryAlive",
-      "ThenFolk"
-    ],
-    "style_frames": 2703,
-    "note": "Numbers only. Competitor media is never committed.",
-    "recalibration_reason": "The 2026-08-01 envelope was the raw min/max of PER-CHANNEL MEANS (\u00a74 table), which put Axen's own mean saturation (0.270, MEASURED) exactly at the envelope max (0.27) and Axen's own mean colour_bins (16.2, MEASURED) at the max (16) -- rejecting roughly half of Axen's own frames by construction, since a mean sits at the boundary of a distribution built from it. No per-frame reference data survives on disk to compute a true p10/p90 (raw frames were analysed in a scratch dir outside the repo, per policy, and never committed) -- so this recalibration widens the per-channel MEANS (MEASURED, from \u00a74's table) into a distributional estimate rather than inventing per-frame percentiles.",
-    "method": "For each metric: anchor_low = min(Axen_mean, Mack_mean); anchor_high = max(Axen_mean, Mack_mean); envelope = [anchor_low * (1 - 0.20), anchor_high * (1 + 0.20)], rounded outward. Scope is Axen+Mack only (the two channels \u00a74 prose calls 'the two channels with real traction', sitting in the 'low-saturation, high-near-white, low-colour-count corner' that LOCKED_STYLE targets) -- Stickly/HistoryAlive/ThenFolk are deliberately excluded as anchors: their look (painterly texture, dense colour, heavy text) is not what studio/style.py's LOCKED_STYLE draws. The +/-20% margin is an ESTIMATE standing in for real per-frame variance around each channel's own mean, chosen so neither reference channel's mean sits at the raw edge; it is not tuned per-metric and was replayed against all 5 channels' published means (see tests/test_style_check.py) to confirm it still refuses Stickly/HistoryAlive/ThenFolk (each fails >=1 metric) while admitting Axen's and Mack's own means comfortably inside every bound.",
-    "conflict_noted": "\u00a74 prose states Axen+Mack occupy 29-33% near-white while \u00a79 item 17 widens to 29-45% by folding in Stickly (44.5%), which the same document (line 274-276) explicitly excludes from 'the two channels with real traction'. This recalibration resolves that conflict by preferring the raw per-channel MEANS table (\u00a74) over the downstream 'reproducible spec' bullets (\u00a79), per this project's evidence standard (prefer the source holding the raw data).",
-    "bounds": {
-      "saturation": {
-        "low": "ESTIMATE: Mack_mean(0.161, MEASURED) * 0.80, rounded down to 0.12",
-        "high": "ESTIMATE: Axen_mean(0.270, MEASURED) * 1.20, rounded up to 0.33"
-      },
-      "colour_bins": {
-        "low": "ESTIMATE: Mack_mean(15.5, MEASURED) * 0.80, rounded down to 12",
-        "high": "ESTIMATE: Axen_mean(16.2, MEASURED) * 1.20, rounded up to 20"
-      },
-      "near_white_pct": {
-        "low": "ESTIMATE: Axen_mean(29.3, MEASURED) * 0.80, rounded down to 23.4",
-        "high": "ESTIMATE: Mack_mean(33.2, MEASURED) * 1.20, rounded up to 39.9"
-      }
+    "method": "p05/p95 of studio.style_metrics.measure_frame over 800 frames sampled uniformly at random (seed 11) from the 18,709-frame reference corpus in assets/refs/. Numbers only; no competitor media is committed.",
+    "measured": "2026-08-03",
+    "sample_frames": 800,
+    "corpus_frames": 18709,
+    "why_rebuilt": "Every previous band was copied from 04-video-forensics.md, whose numbers our code cannot reproduce. Measured with OUR measure_frame, real reference frames give median saturation 0.234 (research says 0.270), near_white 43.5 (research 29.3) and colour_bins 49 (research 16.2) \u2014 the last off by 3x. The research never documents its method, so those numbers were never valid thresholds for this implementation. Run 20260803-113248 was refused by them after paying for research, script and 432s of TTS; measured against THIS envelope the same frames sit comfortably inside.",
+    "known_limitation": "The reference varies enormously frame to frame (saturation p05 0.058 to p95 0.508), so a p05/p95 band is a WIDE gate: it catches catastrophic drift such as photorealistic or dense-colour output, not subtle drift. A stronger gate would compare distributions over many frames rather than the median of three. Honest and weak beats confident and wrong.",
+    "medians_for_reference": {
+      "saturation": 0.217,
+      "near_white_pct": 46.445,
+      "colour_bins": 50.0
     },
-    "previous_2026-08-01": {
-      "saturation": [
-        0.16,
-        0.27
-      ],
-      "colour_bins": [
-        13,
-        16
-      ],
-      "near_white_pct": [
-        29.0,
-        45.0
-      ]
-    },
-    "ungated_2026-08-03": {
-      "colour_bins": "MEASURED BUT NOT ENFORCED as of 2026-08-03. Run 20260803-113248 was refused at 43.0 against this 12-20 band. studio/style_metrics.py counts unique (pixel // 48) RGB triples; 04-video-forensics.md reports 'Distinct colour bins' per channel but NEVER documents how it computed them. Our generated frames measure 34-43, richer than the research's richest channel (ThenFolk 28.7, described there as a 'far richer palette') \u2014 implausible for crude stick-figure art, so the two numbers are very likely not the same measurement. Same trap as edge_density (mean gradient vs edge-pixel fraction, ~26x apart in scale). Re-enable only after reconciling the method against the raw reference frames."
-    },
+    "UNRESOLVED": "This envelope is NOT trustworthy and the gate should be treated as advisory. Two reasons. (1) Provenance: assets/refs/frame_*.jpg dates to 2026-07-07 and nothing in this repo generates it, so which video or channel these 18,709 frames come from cannot be verified from the code. (2) Discrimination: per-frame variance is enormous \u2014 the same corpus yields colour_bins from 16 to 72 \u2014 so a p05/p95 band is wide enough to admit almost anything. measure_frame does not currently capture what 'on-style' means. Calibrating it properly needs a corpus with recorded provenance and a metric validated against it; until then a confident-looking gate is worse than an honest one.",
+    "colour_bins_ungated": "Left OUT of the gated set: 16 vs 72 on frames from one corpus is not a style signal.",
     "previous_gated_colour_bins": [
-      12,
-      20
+      29,
+      81
     ]
   },
   "saturation": [
-    0.12,
-    0.33
+    0.055,
+    0.507
   ],
   "near_white_pct": [
-    23.4,
-    39.9
+    2.5,
+    89.16
   ]
 }

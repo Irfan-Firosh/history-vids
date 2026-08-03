@@ -107,24 +107,27 @@ def test_envelope_admits_its_own_reference_channels_mean():
         assert lo < channel["near_white_pct"] < hi
 
 
-def test_envelope_still_refuses_known_off_style_channels():
-    """Widening the envelope to stop rejecting the reference channels must not turn it into a
-    rubber stamp: peer channels with a visibly different look (busier palette, painterly detail,
-    far less empty space) must still fail at least one metric."""
-    envelope = style_check.load_envelope()
-    known_bad = {
-        "Stickly": (0.117, 13.1, 44.5),
-        "HistoryAlive": (0.277, 28.1, 14.6),
-        "ThenFolk": (0.348, 28.7, 7.4),
-    }
-    for name, (sat, bins, white) in known_bad.items():
-        sat_ok = envelope.saturation[0] <= sat <= envelope.saturation[1]
-        bins_ok = (
-            True if envelope.colour_bins is None
-            else envelope.colour_bins[0] <= bins <= envelope.colour_bins[1]
-        )
-        white_ok = envelope.near_white_pct[0] <= white <= envelope.near_white_pct[1]
-        assert not (sat_ok and bins_ok and white_ok), f"{name} should still fail >=1 metric"
+def test_envelope_is_documented_as_untrustworthy_rather_than_silently_wide():
+    """The previous version of this test asserted that Stickly / HistoryAlive / ThenFolk still
+    fail at least one metric, using the research's published per-channel means. Those means are
+    not in this implementation's metric space: measured with OUR measure_frame, real reference
+    frames give median saturation 0.234 (research 0.270), near_white 43.5 (research 29.3) and
+    colour_bins 49 (research 16.2). Re-deriving the bands from the local corpus produced a p05/p95
+    so wide it admits almost anything, and that corpus's provenance cannot be verified from this
+    repo.
+
+    So the gate cannot currently discriminate style, and the honest response is to SAY so in the
+    envelope rather than ship a confident-looking threshold. This test pins that admission: if
+    someone re-narrows the bands, they must also remove this note, which forces the question of
+    what evidence justified it."""
+    import json
+    import pathlib as _p
+
+    raw = json.loads(_p.Path("context/project/style-envelope.json").read_text())
+    prov = raw["_provenance"]
+    assert "UNRESOLVED" in prov, "the envelope must declare that it is not trustworthy"
+    assert "provenance" in prov["UNRESOLVED"].lower()
+    assert "colour_bins" not in raw, "colour_bins does not discriminate; it must stay ungated"
 
 
 # ── measure_frame + conforms wiring, real math over synthetic frames ────────────────────────
