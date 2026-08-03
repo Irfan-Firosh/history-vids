@@ -1,68 +1,129 @@
 <!doctype html>
-<html lang="en" data-theme="light">
+<html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="light dark" />
 <title>New Run</title>
 <style>
-  :root { --bg:#fff; --fg:#000; --line:#000; --muted:#555; --hover:#f0f0f0; }
-  html[data-theme="dark"] { --bg:#0a0a0a; --fg:#e8e8e8; --line:#e8e8e8; --muted:#888; --hover:#161616; }
-  * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--fg);
-    font:13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-  header { display:flex; gap:12px; align-items:center; padding:12px 16px; border-bottom:2px solid var(--line); }
-  header h1 { font-size:14px; margin:0; letter-spacing:.5px; text-transform:uppercase; }
-  header .spacer { flex:1; }
-  a { color:var(--fg); }
-  main { max-width:640px; margin:0 auto; padding:24px 16px; }
-  label { display:block; text-transform:uppercase; font-size:11px; letter-spacing:.5px; color:var(--muted); margin-bottom:4px; }
-  select, button, input[type=text] { font:inherit; background:var(--bg); color:var(--fg);
-    border:1px solid var(--line); padding:6px 8px; border-radius:0; width:100%; }
-  button { cursor:pointer; width:auto; }
-  button:hover:not(:disabled) { background:var(--fg); color:var(--bg); }
-  button:disabled { color:var(--muted); border-color:var(--muted); cursor:not-allowed; }
-  .field { margin-bottom:16px; }
-  .roles { border:1px solid var(--line); }
-  .role { display:grid; grid-template-columns:1fr 200px; gap:10px; align-items:center;
-    padding:10px 12px; border-bottom:1px solid var(--line); }
-  .role:last-child { border-bottom:0; }
-  .role .desc { font-size:11px; color:var(--muted); }
-  .role .name { font-weight:bold; text-transform:none; }
-  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
-  .rec { border:1px solid var(--line); padding:10px 12px; margin-bottom:16px; }
-  .rec .t { text-transform:uppercase; font-size:11px; letter-spacing:.5px; }
-  #status { font-size:12px; color:var(--muted); min-height:18px; margin-top:10px; }
-  h2 { font-size:12px; text-transform:uppercase; letter-spacing:.5px; border-bottom:1px solid var(--line);
-    padding-bottom:4px; margin:0 0 12px; }
+:root {
+  color-scheme: light;
+  --hue: 227;
+  --accent: hsl(var(--hue) 78% 50%); --accent-fg: #fff;
+  --bg: hsl(240 9% 96%); --surface: hsl(0 0% 100%); --surface-2: hsl(240 9% 97%);
+  --border: hsl(240 8% 87%); --border-strong: hsl(240 8% 76%);
+  --text: hsl(240 12% 10%); --text-dim: hsl(240 6% 38%); --text-faint: hsl(240 6% 56%);
+  --radius: 10px; --radius-sm: 6px;
+  --fs-2xs: 10px; --fs-xs: 11px; --fs-sm: 12px; --fs-base: 13px; --fs-md: 14.5px; --fs-lg: 17px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --accent: hsl(var(--hue) 90% 68%); --accent-fg: hsl(240 12% 8%);
+    --bg: hsl(240 10% 7%); --surface: hsl(240 9% 10%); --surface-2: hsl(240 9% 13%);
+    --border: hsl(240 8% 20%); --border-strong: hsl(240 8% 29%);
+    --text: hsl(240 10% 94%); --text-dim: hsl(240 6% 66%); --text-faint: hsl(240 6% 45%);
+  }
+}
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --accent: hsl(var(--hue) 90% 68%); --accent-fg: hsl(240 12% 8%);
+  --bg: hsl(240 10% 7%); --surface: hsl(240 9% 10%); --surface-2: hsl(240 9% 13%);
+  --border: hsl(240 8% 20%); --border-strong: hsl(240 8% 29%);
+  --text: hsl(240 10% 94%); --text-dim: hsl(240 6% 66%); --text-faint: hsl(240 6% 45%);
+}
+html[data-theme="light"] {
+  color-scheme: light;
+  --accent: hsl(var(--hue) 78% 50%); --accent-fg: #fff;
+  --bg: hsl(240 9% 96%); --surface: hsl(0 0% 100%); --surface-2: hsl(240 9% 97%);
+  --border: hsl(240 8% 87%); --border-strong: hsl(240 8% 76%);
+  --text: hsl(240 12% 10%); --text-dim: hsl(240 6% 38%); --text-faint: hsl(240 6% 56%);
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: var(--fs-base)/1.5 ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+a { color: var(--accent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+header {
+  display: flex; gap: 12px; align-items: center; padding: 12px 20px;
+  border-bottom: 1px solid var(--border); background: var(--surface);
+}
+header h1 { font-size: var(--fs-md); margin: 0; letter-spacing: .02em; text-transform: uppercase; }
+header .spacer { flex: 1; }
+main { max-width: 640px; margin: 0 auto; padding: 28px 20px 60px; }
+label.field-label {
+  display: block; text-transform: uppercase; font-size: var(--fs-2xs); letter-spacing: .06em;
+  color: var(--text-faint); margin-bottom: 5px;
+}
+select, button, input[type=text] {
+  font: inherit; font-size: var(--fs-sm); background: var(--surface-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 7px 9px; width: 100%;
+}
+button {
+  cursor: pointer; width: auto; font-weight: 600; text-transform: uppercase; font-size: var(--fs-xs);
+  letter-spacing: .02em; background: var(--accent); color: var(--accent-fg); border-color: var(--accent);
+}
+button:hover:not(:disabled) { filter: brightness(1.06); }
+button:disabled { background: var(--surface-2); color: var(--text-faint); border-color: var(--border); cursor: not-allowed; }
+button.ghost { background: transparent; color: var(--text); border-color: var(--border-strong); }
+.field { margin-bottom: 18px; }
+.roles { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--surface); }
+.role {
+  display: grid; grid-template-columns: 1fr 190px; gap: 10px; align-items: center;
+  padding: 12px 14px; border-bottom: 1px solid var(--border);
+}
+.role:last-child { border-bottom: 0; }
+.role .desc { font-size: var(--fs-xs); color: var(--text-faint); }
+.role .name { font-weight: 600; }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.rec {
+  border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 20px;
+  background: var(--surface);
+}
+.rec .t { text-transform: uppercase; font-size: var(--fs-xs); letter-spacing: .05em; color: var(--text-dim); font-weight: 600; }
+#status { font-size: var(--fs-sm); color: var(--text-dim); min-height: 18px; margin-top: 12px; }
+h2 {
+  font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .05em; color: var(--text-dim);
+  border-bottom: 1px solid var(--border); padding-bottom: 6px; margin: 0 0 12px;
+}
+.theme-icon { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.8; }
 </style>
 </head>
 <body>
 <header>
   <h1>New Run</h1>
   <span class="spacer"></span>
-  <a href="/">← back to runs</a>
-  <button id="theme-btn" title="toggle dark / light">◐ theme</button>
+  <a href="/">&larr; back to runs</a>
+  <button id="theme-btn" class="ghost" type="button" style="width:32px;height:30px;display:flex;align-items:center;justify-content:center;padding:0;" title="Toggle color theme" aria-label="Toggle color theme">
+    <svg class="theme-icon" id="theme-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="4"></circle>
+      <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path>
+    </svg>
+  </button>
 </header>
 
 <main>
   <div class="rec">
     <div class="t">Recommended</div>
-    <div class="desc" style="font-size:12px;color:var(--muted);margin:4px 0 8px;">
-      Agnes for every image role (free · fast · on-style · reference-conditioned) + Cartesia voice.
+    <div class="desc" style="font-size:var(--fs-sm);color:var(--text-faint);margin:6px 0 10px;">
+      Agnes for every image role (free, fast, on-style, reference-conditioned) + Cartesia voice.
     </div>
-    <button id="rec-btn">Use recommended preset</button>
+    <button id="rec-btn" type="button">Use recommended preset</button>
   </div>
 
   <div class="field">
-    <label for="topic">Topic (optional)</label>
+    <label class="field-label" for="topic">Topic (optional)</label>
     <input type="text" id="topic" placeholder="leave blank to render the demo storyboard" />
   </div>
 
   <div class="field">
-    <label>Target length (minutes) — for topic runs</label>
+    <label class="field-label">Target length (minutes) — for topic runs</label>
     <div class="row">
-      <input type="text" id="min_minutes" value="6" style="width:64px" /> <span class="desc">min</span>
-      <input type="text" id="max_minutes" value="9" style="width:64px" /> <span class="desc">max</span>
+      <input type="text" id="min_minutes" value="6" style="width:70px" /> <span class="desc">min</span>
+      <input type="text" id="max_minutes" value="9" style="width:70px" /> <span class="desc">max</span>
     </div>
   </div>
 
@@ -73,24 +134,24 @@
       <select id="char_model"></select>
     </div>
     <div class="role">
-      <div><div class="name">Concept / map</div><div class="desc">props, symbols, geography (no character) — emphasis is baked into the frame</div></div>
+      <div><div class="name">Concept / map</div><div class="desc">props, symbols, geography (no character) — emphasis baked into the frame</div></div>
       <select id="concept_model"></select>
     </div>
   </div>
 
-  <h2 style="margin-top:20px;">Voice &amp; options</h2>
+  <h2 style="margin-top:24px;">Voice &amp; options</h2>
   <div class="field">
-    <label for="voice">Voice</label>
+    <label class="field-label" for="voice">Voice</label>
     <select id="voice">
       <option value="cartesia" selected>cartesia (Carson)</option>
       <option value="say">say (macOS, offline)</option>
     </select>
   </div>
   <div class="field row">
-    <label style="margin:0;"><input type="checkbox" id="captions" checked style="width:auto;" /> subtitles</label>
+    <label style="margin:0;font-size:var(--fs-sm);"><input type="checkbox" id="captions" checked style="width:auto;" /> subtitles</label>
   </div>
 
-  <button id="start-btn">▶ Start run</button>
+  <button id="start-btn" type="button">Start run</button>
   <div id="status"></div>
 </main>
 
@@ -99,30 +160,40 @@ const $ = (s) => document.querySelector(s);
 const IMAGE_MODELS = ["agnes", "gemini"];  // offered providers (cloudflare/hf kept in code, not offered)
 const ROLE_IDS = ["char_model", "concept_model"];
 
-function applyTheme(t){ document.documentElement.dataset.theme=t; localStorage.setItem("theme",t); }
-$("#theme-btn").onclick = () => applyTheme(document.documentElement.dataset.theme==="dark"?"light":"dark");
-applyTheme(localStorage.getItem("theme") || "light");
+function currentTheme() {
+  return document.documentElement.getAttribute("data-theme") ||
+    (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+}
+function applyTheme(t) {
+  if (t) { document.documentElement.setAttribute("data-theme", t); localStorage.setItem("theme", t); }
+  const dark = currentTheme() === "dark";
+  $("#theme-icon").innerHTML = dark
+    ? '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"></path>'
+    : '<circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path>';
+}
+$("#theme-btn").onclick = () => applyTheme(currentTheme() === "dark" ? "light" : "dark");
+applyTheme(localStorage.getItem("theme") || null);
 
 // populate the per-role selects
 for (const id of ROLE_IDS) {
-  const sel = $("#"+id);
+  const sel = $("#" + id);
   for (const m of IMAGE_MODELS) {
-    const o = document.createElement("option"); o.value=m; o.textContent=m; sel.appendChild(o);
+    const o = document.createElement("option"); o.value = m; o.textContent = m; sel.appendChild(o);
   }
 }
-function setRecommended(){
-  for (const id of ROLE_IDS) $("#"+id).value = "agnes";
+function setRecommended() {
+  for (const id of ROLE_IDS) $("#" + id).value = "agnes";
   $("#voice").value = "cartesia";
   $("#captions").checked = true;
 }
-setRecommended();  // start on the recommended preset
+setRecommended();
 $("#rec-btn").onclick = setRecommended;
 
 $("#start-btn").onclick = async () => {
-  const btn = $("#start-btn"); btn.disabled = true; $("#status").textContent = "starting…";
+  const btn = $("#start-btn"); btn.disabled = true; $("#status").textContent = "Starting…";
   try {
     const res = await fetch("/api/runs", {
-      method:"POST", headers:{"Content-Type":"application/json"},
+      method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         topic: $("#topic").value.trim() || null,
         char_model: $("#char_model").value,
@@ -134,14 +205,14 @@ $("#start-btn").onclick = async () => {
       }),
     });
     if (!res.ok) {
-      const e = await res.json().catch(()=>({}));
-      $("#status").textContent = "error: " + (e.detail || res.status); btn.disabled = false; return;
+      const e = await res.json().catch(() => ({}));
+      $("#status").textContent = "Error: " + (e.detail || res.status); btn.disabled = false; return;
     }
     const { run_id } = await res.json();
-    $("#status").textContent = "started " + run_id + " — redirecting…";
-    window.location = "/";  // the run appears at the top of the list, live
+    $("#status").textContent = "Started " + run_id + " — redirecting…";
+    window.location = "/";
   } catch (err) {
-    $("#status").textContent = "error: " + err; btn.disabled = false;
+    $("#status").textContent = "Error: " + err; btn.disabled = false;
   }
 };
 </script>

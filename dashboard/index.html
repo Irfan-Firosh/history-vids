@@ -1,587 +1,955 @@
 <!doctype html>
-<html lang="en" data-theme="light">
+<html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="light dark" />
 <title>Pipeline Runs</title>
 <style>
-  /* Strict black & white, one monospace face. Theme = CSS vars; dark just swaps bg/fg. */
-  :root { --bg:#fff; --fg:#000; --line:#000; --muted:#555; --hover:#f0f0f0; --panel:#fff; }
-  html[data-theme="dark"] { --bg:#0a0a0a; --fg:#e8e8e8; --line:#e8e8e8; --muted:#888; --hover:#161616; --panel:#0a0a0a; }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--bg); color: var(--fg);
-    font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+/* ── Design tokens ─────────────────────────────────────────────────────────
+   One accent hue (indigo-blue) for interactive/primary elements. Everything
+   else is neutral grey. Status gets its own small semantic set (red/amber/
+   green) — always paired with a text label, never color alone. Light is the
+   default; dark applies via prefers-color-scheme, overridable by [data-theme]
+   which always wins on specificity (attribute selector > bare :root/html). */
+:root {
+  color-scheme: light;
+  --hue: 227;
+  --accent: hsl(var(--hue) 78% 50%);
+  --accent-fg: #fff;
+  --accent-tint: hsl(var(--hue) 78% 95%);
+  --accent-border: hsl(var(--hue) 55% 74%);
+
+  --red: hsl(4 72% 42%);
+  --red-tint: hsl(4 72% 96%);
+  --amber: hsl(35 88% 34%);
+  --amber-tint: hsl(40 88% 94%);
+  --green: hsl(152 58% 28%);
+  --green-tint: hsl(152 58% 95%);
+
+  --bg: hsl(240 9% 96%);
+  --surface: hsl(0 0% 100%);
+  --surface-2: hsl(240 9% 97%);
+  --border: hsl(240 8% 87%);
+  --border-strong: hsl(240 8% 76%);
+  --text: hsl(240 12% 10%);
+  --text-dim: hsl(240 6% 38%);
+  --text-faint: hsl(240 6% 56%);
+  --shadow: 0 1px 2px hsl(240 20% 10% / .05), 0 1px 1px hsl(240 20% 10% / .04);
+
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px; --sp-6: 24px;
+  --radius: 10px; --radius-sm: 6px;
+  --fs-2xs: 10px; --fs-xs: 11px; --fs-sm: 12px; --fs-base: 13px; --fs-md: 14.5px; --fs-lg: 17px; --fs-xl: 20px;
+  --row: 84px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --accent: hsl(var(--hue) 90% 68%);
+    --accent-fg: hsl(240 12% 8%);
+    --accent-tint: hsl(var(--hue) 42% 18%);
+    --accent-border: hsl(var(--hue) 50% 36%);
+    --red: hsl(6 88% 68%);
+    --red-tint: hsl(6 50% 16%);
+    --amber: hsl(38 92% 63%);
+    --amber-tint: hsl(38 55% 15%);
+    --green: hsl(150 55% 56%);
+    --green-tint: hsl(150 45% 13%);
+    --bg: hsl(240 10% 7%);
+    --surface: hsl(240 9% 10%);
+    --surface-2: hsl(240 9% 13%);
+    --border: hsl(240 8% 20%);
+    --border-strong: hsl(240 8% 29%);
+    --text: hsl(240 10% 94%);
+    --text-dim: hsl(240 6% 66%);
+    --text-faint: hsl(240 6% 45%);
+    --shadow: 0 1px 2px hsl(0 0% 0% / .35), 0 1px 1px hsl(0 0% 0% / .25);
   }
-  header {
-    display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
-    padding: 12px 16px; border-bottom: 2px solid var(--line);
-  }
-  header h1 { font-size: 14px; margin: 0; letter-spacing: .5px; text-transform: uppercase; }
-  header .spacer { flex: 1; }
-  label { text-transform: uppercase; font-size: 11px; letter-spacing: .5px; }
-  select, button, input[type=text] {
-    font: inherit; background: var(--bg); color: var(--fg);
-    border: 1px solid var(--line); padding: 4px 8px; border-radius: 0;
-  }
-  input[type=text] { min-width: 240px; }
-  button { cursor: pointer; }
-  button:hover:not(:disabled) { background: var(--fg); color: var(--bg); }
-  button:disabled { color: var(--muted); border-color: var(--muted); cursor: not-allowed; }
-  #status { font-size: 11px; color: var(--muted); }
+}
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --accent: hsl(var(--hue) 90% 68%); --accent-fg: hsl(240 12% 8%);
+  --accent-tint: hsl(var(--hue) 42% 18%); --accent-border: hsl(var(--hue) 50% 36%);
+  --red: hsl(6 88% 68%); --red-tint: hsl(6 50% 16%);
+  --amber: hsl(38 92% 63%); --amber-tint: hsl(38 55% 15%);
+  --green: hsl(150 55% 56%); --green-tint: hsl(150 45% 13%);
+  --bg: hsl(240 10% 7%); --surface: hsl(240 9% 10%); --surface-2: hsl(240 9% 13%);
+  --border: hsl(240 8% 20%); --border-strong: hsl(240 8% 29%);
+  --text: hsl(240 10% 94%); --text-dim: hsl(240 6% 66%); --text-faint: hsl(240 6% 45%);
+  --shadow: 0 1px 2px hsl(0 0% 0% / .35), 0 1px 1px hsl(0 0% 0% / .25);
+}
+html[data-theme="light"] {
+  color-scheme: light;
+  --accent: hsl(var(--hue) 78% 50%); --accent-fg: #fff;
+  --accent-tint: hsl(var(--hue) 78% 95%); --accent-border: hsl(var(--hue) 55% 74%);
+  --red: hsl(4 72% 42%); --red-tint: hsl(4 72% 96%);
+  --amber: hsl(35 88% 34%); --amber-tint: hsl(40 88% 94%);
+  --green: hsl(152 58% 28%); --green-tint: hsl(152 58% 95%);
+  --bg: hsl(240 9% 96%); --surface: hsl(0 0% 100%); --surface-2: hsl(240 9% 97%);
+  --border: hsl(240 8% 87%); --border-strong: hsl(240 8% 76%);
+  --text: hsl(240 12% 10%); --text-dim: hsl(240 6% 38%); --text-faint: hsl(240 6% 56%);
+  --shadow: 0 1px 2px hsl(240 20% 10% / .05), 0 1px 1px hsl(240 20% 10% / .04);
+}
 
-  main { display: grid; grid-template-columns: 240px 1fr; min-height: calc(100vh - 51px); }
-  #runs { border-right: 2px solid var(--line); overflow-y: auto; }
-  .run { padding: 8px 12px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 6px; }
-  .run:hover { background: var(--hover); }
-  .run.active { background: var(--fg); color: var(--bg); }
-  .run-body { flex: 1; min-width: 0; cursor: pointer; }
-  .run .id { font-weight: bold; }
-  .run .meta { font-size: 11px; color: var(--muted); }
-  .run.active .meta { color: var(--bg); opacity: .7; }
-  .run-del { border: 1px solid transparent; background: transparent; color: var(--muted);
-             font: inherit; cursor: pointer; padding: 1px 6px; border-radius: 0; }
-  .run:hover .run-del { border-color: var(--line); }
-  .run-del:hover { background: var(--fg); color: var(--bg); }
-  .run.active .run-del { color: var(--bg); border-color: var(--bg); }
+/* ── Reset + base ───────────────────────────────────────────────────────── */
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: var(--fs-base)/1.5 ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 99px; }
+::-webkit-scrollbar-track { background: transparent; }
+* { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+h1, h2, h3 { margin: 0; font-weight: 600; }
 
-  #detail { padding: 16px; overflow-y: auto; }
-  .empty { color: var(--muted); padding: 40px; text-align: center; }
-  .tag { border: 1px solid var(--line); padding: 0 6px; text-transform: uppercase; font-size: 10px; }
-  .tag.failed { background: var(--fg); color: var(--bg); }
-  .sub { font-size: 11px; color: var(--muted); }
-  a { color: var(--fg); }
+/* ── Top bar ────────────────────────────────────────────────────────────── */
+.topbar {
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.brand { display: flex; align-items: baseline; gap: var(--sp-3); min-width: 0; white-space: nowrap; }
+.brand h1 { font-size: var(--fs-md); letter-spacing: .02em; text-transform: uppercase; }
+.brand .sub { font-size: var(--fs-xs); color: var(--text-faint); text-transform: uppercase; letter-spacing: .06em; }
+.topbar-spacer { flex: 1; }
+.topbar-actions { display: flex; align-items: center; gap: var(--sp-2); flex: 0 0 auto; }
+#announcer { font-size: var(--fs-xs); color: var(--text-dim); min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 32ch; }
+@media (max-width: 520px) {
+  .topbar { padding: var(--sp-2) var(--sp-3); }
+  .brand .sub { display: none; }
+  #announcer { display: none; }
+}
 
-  h2 { font-size: 13px; margin: 18px 0 8px; text-transform: uppercase; letter-spacing: .5px;
-       border-bottom: 1px solid var(--line); padding-bottom: 4px; }
+/* ── Buttons / inputs / form controls ──────────────────────────────────── */
+.btn {
+  font: inherit; font-size: var(--fs-xs); font-weight: 600; letter-spacing: .02em; text-transform: uppercase;
+  cursor: pointer; border-radius: var(--radius-sm); border: 1px solid var(--border-strong);
+  background: var(--surface); color: var(--text); padding: 6px 12px;
+  transition: background-color .12s ease, border-color .12s ease, color .12s ease;
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+}
+.btn:hover:not(:disabled) { border-color: var(--text-dim); }
+.btn:disabled { color: var(--text-faint); border-color: var(--border); cursor: not-allowed; }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.btn-primary:hover:not(:disabled) { filter: brightness(1.06); border-color: var(--accent); }
+.btn-primary:disabled { background: var(--surface-2); color: var(--text-faint); border-color: var(--border); }
+.btn-ghost { background: transparent; }
+.btn-icon { width: 30px; height: 30px; padding: 0; justify-content: center; }
+.field-label { display: block; font-size: var(--fs-2xs); text-transform: uppercase; letter-spacing: .06em; color: var(--text-faint); margin-bottom: 3px; }
+.input, .textarea, select.input {
+  font: inherit; font-size: var(--fs-sm); background: var(--surface-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 6px 8px; width: 100%;
+}
+.input:focus-visible, .textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.textarea { resize: vertical; line-height: 1.4; }
+.row { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
 
-  /* Script — the narration beats, readable top-to-bottom */
-  .script { border: 1px solid var(--line); }
-  .beat { display: grid; grid-template-columns: 28px 70px 1fr; gap: 10px; padding: 8px 10px;
-          border-bottom: 1px solid var(--line); }
-  .beat:last-child { border-bottom: 0; }
-  .beat .n { color: var(--muted); }
-  .beat .st { font-size: 10px; text-transform: uppercase; color: var(--muted); }
-  .beat .cite { color: var(--muted); }
+/* ── Status pill ────────────────────────────────────────────────────────── */
+.pill {
+  display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 99px;
+  font-size: var(--fs-2xs); font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+  border: 1px solid transparent; line-height: 1.6;
+}
+.pill .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: 0 0 auto; }
+.pill-running { color: var(--accent); background: var(--accent-tint); border-color: var(--accent-border); }
+.pill-running .dot { animation: pulse 1.6s ease-in-out infinite; }
+.pill-review { color: var(--amber); background: var(--amber-tint); border-color: var(--amber); }
+.pill-done { color: var(--green); background: var(--green-tint); border-color: var(--green); }
+.pill-failed { color: var(--red); background: var(--red-tint); border-color: var(--red); }
+.pill-neutral { color: var(--text-dim); background: var(--surface-2); border-color: var(--border); }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
 
-  .scenes { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
-  .card { border: 1px solid var(--line); padding: 8px; }
-  .card .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
-  .card img { width: 100%; display: block; border: 1px solid var(--line); background: var(--hover); aspect-ratio: 16/9; object-fit: cover; }
-  /* a "fire spot" beat shows both of its distinct frames side by side (the on-screen cut) */
-  .card .frames { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
-  .card .frames.one { grid-template-columns: 1fr; }
-  .card .frames .fr { position: relative; }
-  .card .frames .fr .n { position: absolute; top: 3px; left: 3px; font-size: 10px; padding: 0 4px;
-              background: rgba(0,0,0,.6); color: #fff; border-radius: 2px; }
-  .card .ph { width: 100%; aspect-ratio: 16/9; border: 1px dashed var(--muted); display: flex;
-              align-items: center; justify-content: center; color: var(--muted); font-size: 11px; }
-  .card .narr { font-size: 12px; margin-top: 6px; }
-  .card .prompt { font-size: 11px; margin-top: 4px; color: var(--muted); }
+/* ── Layout: nav rail + bento board ────────────────────────────────────── */
+.layout { display: flex; flex-direction: column; min-height: calc(100vh - 53px); }
+.rail {
+  flex: 0 0 auto; max-height: 260px; overflow-y: auto;
+  border-bottom: 1px solid var(--border); background: var(--surface);
+}
+.rail-head {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-4); font-size: var(--fs-2xs); text-transform: uppercase;
+  letter-spacing: .06em; color: var(--text-faint); position: sticky; top: 0; background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.run-item {
+  display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-4);
+  border-bottom: 1px solid var(--border); cursor: pointer;
+}
+.run-item:hover { background: var(--surface-2); }
+.run-item.active { background: var(--accent-tint); }
+.run-item .run-main { flex: 1; min-width: 0; }
+.run-item .run-id { font-size: var(--fs-sm); font-weight: 600; }
+.run-item .run-meta { font-size: var(--fs-xs); color: var(--text-faint); display: flex; align-items: center; gap: 6px; margin-top: 2px; }
+.run-item .run-meta .status-dot { width: 6px; height: 6px; border-radius: 50%; flex: 0 0 auto; }
+.run-del {
+  border: 1px solid transparent; background: transparent; color: var(--text-faint); font: inherit;
+  font-size: var(--fs-sm); cursor: pointer; border-radius: var(--radius-sm); padding: 2px 7px; line-height: 1;
+}
+.run-item:hover .run-del { border-color: var(--border); }
+.run-del:hover { background: var(--red-tint); color: var(--red); border-color: var(--red); }
 
-  /* Planned callouts */
-  ul.callouts { list-style: none; padding: 0; margin: 0; }
-  ul.callouts li { font-size: 13px; padding: 4px 0; border-bottom: 1px solid var(--line); }
+.board {
+  flex: 1; padding: var(--sp-5); display: grid; gap: var(--sp-4); grid-auto-rows: auto;
+  align-content: start;
+}
 
-  /* Exa sources */
-  .src { border: 1px solid var(--line); padding: 8px 10px; border-bottom: 0; }
-  .src:last-child { border-bottom: 1px solid var(--line); }
-  .src .t { font-size: 12px; }
-  .src .u { font-size: 11px; color: var(--muted); word-break: break-all; }
+@media (min-width: 860px) {
+  .layout { flex-direction: row; }
+  .rail { width: 280px; flex: 0 0 280px; max-height: none; border-bottom: 0; border-right: 1px solid var(--border); }
+  .board { grid-template-columns: repeat(12, 1fr); grid-auto-rows: var(--row); }
+  .w-3 { grid-column: span 3; } .w-4 { grid-column: span 4; } .w-6 { grid-column: span 6; }
+  .w-8 { grid-column: span 8; } .w-9 { grid-column: span 9; } .w-12 { grid-column: span 12; }
+  .h-2 { grid-row: span 2; } .h-3 { grid-row: span 3; } .h-4 { grid-row: span 4; }
+  .h-5 { grid-row: span 5; } .h-6 { grid-row: span 6; } .h-7 { grid-row: span 7; }
+}
 
-  .reedit { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 10px 0; }
-  .reedit input[type=text] { min-width: 0; width: 56px; }
-  .reedit.review { border: 1px solid var(--fg); padding: 8px 10px; }
-  .regen { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
-  .regen-prompt { width: 100%; box-sizing: border-box; font: inherit; font-size: 11px; resize: vertical; }
-  .regen-btn { font-size: 11px; align-self: flex-start; }
-  video { width: 100%; max-width: 720px; border: 1px solid var(--line); background: #000; }
-  img.thumb { width: 100%; max-width: 640px; border: 1px solid var(--line); display: block; margin-bottom: 8px; }
-  pre#log {
-    border: 1px solid var(--line); padding: 10px; background: var(--panel); max-height: 320px;
-    overflow: auto; white-space: pre-wrap; font-size: 12px; margin: 0; color: var(--fg);
-  }
-  .err { border: 2px solid var(--line); padding: 10px; }
-  .err pre { white-space: pre-wrap; font-size: 11px; margin: 6px 0 0; }
+/* ── Tiles ──────────────────────────────────────────────────────────────── */
+.tile {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: var(--shadow); display: flex; flex-direction: column; min-width: 0; overflow: hidden;
+}
+.tile-head {
+  flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--border);
+}
+.tile-head h2 {
+  font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .06em; color: var(--text-dim);
+}
+.tile-head .tile-hint { font-size: var(--fs-2xs); color: var(--text-faint); }
+.tile-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: var(--sp-4); max-height: min(72vh, 640px); }
+.tile-body.no-pad { padding: 0; }
+.tile.accent-failed { border-color: var(--red); }
+.tile.accent-review { border-color: var(--amber-tint); }
+
+.tile-empty { color: var(--text-faint); font-size: var(--fs-sm); padding: var(--sp-4) 0; text-align: center; }
+
+/* ── Meta / actions tile ────────────────────────────────────────────────── */
+.meta-title { font-size: var(--fs-md); font-weight: 600; margin-bottom: 2px; }
+.meta-line { font-size: var(--fs-xs); color: var(--text-dim); margin-bottom: 2px; word-break: break-word; }
+.meta-line b { color: var(--text); font-weight: 600; }
+.meta-divider { border: 0; border-top: 1px solid var(--border); margin: var(--sp-3) 0; }
+.action-block { margin-bottom: var(--sp-3); }
+.action-block:last-child { margin-bottom: 0; }
+.action-note { font-size: var(--fs-2xs); color: var(--text-faint); margin-top: 4px; }
+.action-note.warn { color: var(--amber); }
+
+/* ── Rubric tile ────────────────────────────────────────────────────────── */
+.metric-row {
+  display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-2);
+  padding: 5px 0; border-bottom: 1px dashed var(--border); font-size: var(--fs-sm);
+}
+.metric-row:last-child { border-bottom: 0; }
+.metric-name { color: var(--text-dim); }
+.metric-val { font-weight: 600; }
+.metric-val.pass { color: var(--green); }
+.metric-val.fail { color: var(--red); }
+.metric-threshold { font-size: var(--fs-2xs); color: var(--text-faint); }
+.rubric-summary { display: flex; align-items: center; gap: 8px; margin-bottom: var(--sp-3); }
+.rubric-failures { list-style: none; margin: var(--sp-3) 0 0; padding: var(--sp-2) var(--sp-3); background: var(--red-tint); border-radius: var(--radius-sm); }
+.rubric-failures li { font-size: var(--fs-xs); color: var(--red); padding: 2px 0; }
+
+/* ── Stage timing tile ──────────────────────────────────────────────────── */
+.stage-row { margin-bottom: var(--sp-2); }
+.stage-row:last-child { margin-bottom: 0; }
+.stage-label { display: flex; justify-content: space-between; font-size: var(--fs-xs); margin-bottom: 3px; }
+.stage-label .name { color: var(--text-dim); text-transform: capitalize; }
+.stage-label .val { font-weight: 600; }
+.stage-track { height: 6px; border-radius: 99px; background: var(--surface-2); overflow: hidden; }
+.stage-fill { height: 100%; background: var(--accent); border-radius: 99px; }
+
+/* ── Log tile ───────────────────────────────────────────────────────────── */
+.log-pre {
+  margin: 0; font: inherit; font-size: var(--fs-sm); white-space: pre-wrap; word-break: break-word;
+  color: var(--text-dim);
+}
+.log-pre .line-fresh { color: var(--text); }
+
+/* ── Prompt / research / script tiles ───────────────────────────────────── */
+.prompt-block {
+  font-size: var(--fs-sm); white-space: pre-wrap; word-break: break-word; color: var(--text);
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: var(--sp-3);
+}
+.source-item { padding: var(--sp-2) 0; border-bottom: 1px solid var(--border); }
+.source-item:last-child { border-bottom: 0; }
+.source-item .t { font-size: var(--fs-sm); }
+.source-item .u { font-size: var(--fs-2xs); color: var(--text-faint); word-break: break-all; }
+.source-item .u a { color: var(--text-faint); }
+
+.beat-row { display: grid; grid-template-columns: 26px 68px 1fr; gap: var(--sp-3); padding: 7px 0; border-bottom: 1px solid var(--border); font-size: var(--fs-sm); }
+.beat-row:last-child { border-bottom: 0; }
+.beat-row .n { color: var(--text-faint); }
+.beat-row .st { font-size: var(--fs-2xs); text-transform: uppercase; color: var(--text-faint); letter-spacing: .04em; }
+.beat-row .cite { color: var(--text-faint); font-size: var(--fs-2xs); }
+
+/* ── Image grid / scene cards (the big one) ─────────────────────────────── */
+.scene-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: var(--sp-3); }
+.scene-card { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: var(--sp-2) var(--sp-2) var(--sp-3); background: var(--surface-2); }
+.scene-card .sc-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 6px; font-size: var(--fs-2xs); color: var(--text-faint); }
+.scene-card .sc-tag { text-transform: uppercase; letter-spacing: .04em; color: var(--text-dim); font-weight: 700; }
+.scene-card .sc-badge { border: 1px solid var(--border-strong); border-radius: 99px; padding: 0 6px; }
+.scene-card .sc-badge.callout { color: var(--amber); border-color: var(--amber); }
+.scene-card .sc-badge.failed { color: var(--red); border-color: var(--red); }
+.scene-frames { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.scene-frames.one { grid-template-columns: 1fr; }
+.scene-frames .fr { position: relative; }
+.scene-frames img { width: 100%; display: block; aspect-ratio: 16/9; object-fit: cover; border-radius: 4px; border: 1px solid var(--border); background: var(--surface); }
+.scene-frames .fr-n { position: absolute; top: 4px; left: 4px; font-size: var(--fs-2xs); padding: 0 5px; background: hsl(0 0% 0% / .55); color: #fff; border-radius: 3px; }
+.scene-ph {
+  width: 100%; aspect-ratio: 16/9; border: 1px dashed var(--border-strong); border-radius: 4px;
+  display: flex; align-items: center; justify-content: center; color: var(--text-faint); font-size: var(--fs-xs);
+}
+.scene-narr { font-size: var(--fs-sm); margin-top: 7px; }
+.scene-prompt { font-size: var(--fs-xs); margin-top: 6px; color: var(--text-faint); white-space: pre-wrap; word-break: break-word; }
+.scene-prompt-label { font-size: var(--fs-2xs); text-transform: uppercase; letter-spacing: .05em; color: var(--text-faint); margin-top: 6px; }
+.regen-box { margin-top: 4px; display: flex; flex-direction: column; gap: 5px; }
+.regen-box textarea { font-size: var(--fs-xs); min-height: 46px; }
+.regen-box .btn { align-self: flex-start; }
+
+/* ── Callouts ───────────────────────────────────────────────────────────── */
+.callout-list { list-style: none; margin: 0; padding: 0; }
+.callout-list li { font-size: var(--fs-sm); padding: 6px 0; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; gap: var(--sp-2); }
+.callout-list li:last-child { border-bottom: 0; }
+.callout-list .txt { font-weight: 600; }
+.callout-list .where { color: var(--text-faint); font-size: var(--fs-2xs); white-space: nowrap; }
+
+/* ── Video / thumbnail tile ─────────────────────────────────────────────── */
+.media-block { margin-bottom: var(--sp-4); }
+.media-block:last-child { margin-bottom: 0; }
+.media-block h3 { font-size: var(--fs-2xs); text-transform: uppercase; letter-spacing: .05em; color: var(--text-faint); margin-bottom: 6px; }
+video { width: 100%; max-width: 560px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: #000; display: block; }
+img.thumb { width: 100%; max-width: 420px; border-radius: var(--radius-sm); border: 1px solid var(--border); display: block; }
+
+/* ── Error tile ─────────────────────────────────────────────────────────── */
+.error-msg { font-size: var(--fs-sm); color: var(--red); font-weight: 600; margin-bottom: 8px; }
+.error-trace { margin: 0; font-size: var(--fs-xs); white-space: pre-wrap; word-break: break-word; color: var(--text-dim); background: var(--surface-2); border-radius: var(--radius-sm); padding: var(--sp-3); }
+
+/* ── Empty / whole-board states ─────────────────────────────────────────── */
+.board-empty {
+  grid-column: 1 / -1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; padding: var(--sp-6) var(--sp-5); min-height: 320px; gap: var(--sp-2);
+  border: 1px dashed var(--border-strong); border-radius: var(--radius); color: var(--text-dim);
+}
+.board-empty h2 { font-size: var(--fs-lg); color: var(--text); }
+.board-empty p { font-size: var(--fs-sm); color: var(--text-faint); max-width: 46ch; margin: 0; }
+
+/* ── Sun / moon icon (inline SVG, not emoji) ────────────────────────────── */
+.theme-icon { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.8; }
 </style>
 </head>
 <body>
-<header>
-  <h1>Pipeline Runs</h1>
-  <label>Topic <input type="text" id="topic" placeholder="(optional) generate a script first" /></label>
-  <label>Images
-    <select id="images"><option value="gemini" selected>gemini</option><option value="cloudflare">cloudflare (flux.2 char)</option><option value="hf">hf (free)</option><option value="placeholder">placeholder</option></select>
-  </label>
-  <label>Voice
-    <select id="voice"><option value="say">say</option><option value="cartesia">cartesia</option></select>
-  </label>
-  <label><input type="checkbox" id="captions" checked /> subtitles</label>
-  <button id="run-btn">▶ Run</button>
-  <a href="/new" title="configure models per role">＋ New run (choose models)</a>
-  <span class="spacer"></span>
-  <button id="theme-btn" title="toggle dark / light">◐ theme</button>
-  <span id="status"></span>
+<header class="topbar">
+  <div class="brand">
+    <h1>Pipeline Runs</h1>
+    <span class="sub">Operator console</span>
+  </div>
+  <span id="announcer" role="status" aria-live="polite"></span>
+  <div class="topbar-spacer"></div>
+  <div class="topbar-actions">
+    <a class="btn btn-primary" href="/new">+ New run</a>
+    <button id="theme-btn" class="btn btn-ghost btn-icon" type="button" title="Toggle color theme" aria-label="Toggle color theme">
+      <svg class="theme-icon" id="theme-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="12" r="4"></circle>
+        <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path>
+      </svg>
+    </button>
+  </div>
 </header>
 
-<main>
-  <div id="runs"></div>
-  <div id="detail"><div class="empty">Select a run, or hit ▶ Run to start one.</div></div>
-</main>
+<div class="layout">
+  <aside class="rail" aria-label="Runs">
+    <div class="rail-head"><span>Runs</span><span id="rail-count"></span></div>
+    <div id="runs"></div>
+  </aside>
+  <main id="board" class="board" aria-label="Run detail"></main>
+</div>
 
 <script>
-const $ = (s) => document.querySelector(s);
-let selected = null;     // run_id currently shown
-let pollTimer = null;    // active polling interval
+"use strict";
+const $ = (s, el) => (el || document).querySelector(s);
+let selected = null;   // run_id currently shown
+let pollTimer = null;  // active polling timeout
 
-function setStatus(msg) { $("#status").textContent = msg || ""; }
 function escapeHtml(t) {
-  return (t || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  return (t == null ? "" : String(t)).replace(/[&<>"]/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
 function fileUrl(runId, path) { return `/api/runs/${runId}/file/${path}`; }
+function orDash(v) { return v === null || v === undefined || v === "" ? "—" : v; }
+function fmtSec(v) { return v == null ? "—" : `${v.toFixed(1)}s`; }
+function fmtDur(sec) {
+  if (sec == null) return "—";
+  const m = Math.floor(sec / 60), s = Math.round(sec % 60);
+  return `${m}m${String(s).padStart(2, "0")}s`;
+}
+function setStatus(msg) { $("#announcer").textContent = msg || ""; }
 
-// ── theme ──────────────────────────────────────────────────────────────────
-function applyTheme(t) { document.documentElement.dataset.theme = t; localStorage.setItem("theme", t); }
-$("#theme-btn").onclick = () =>
-  applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
-applyTheme(localStorage.getItem("theme") || "light");
+async function fetchJSON(url) {
+  try {
+    const r = await fetch(url);
+    if (!r.ok) return null;
+    return await r.json();
+  } catch { return null; }
+}
+async function fetchText(url) {
+  try {
+    const r = await fetch(url);
+    return r.ok ? await r.text() : "";
+  } catch { return ""; }
+}
 
-// ── run list ────────────────────────────────────────────────────────────────
+// ── theme ────────────────────────────────────────────────────────────────
+// No stored preference → prefers-color-scheme governs (no attribute set).
+// A stored preference sets data-theme, which always wins on CSS specificity.
+function currentTheme() {
+  return document.documentElement.getAttribute("data-theme") ||
+    (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+}
+function applyTheme(t) {
+  if (t) { document.documentElement.setAttribute("data-theme", t); localStorage.setItem("theme", t); }
+  const dark = currentTheme() === "dark";
+  $("#theme-icon").innerHTML = dark
+    ? '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"></path>'
+    : '<circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path>';
+}
+$("#theme-btn").onclick = () => applyTheme(currentTheme() === "dark" ? "light" : "dark");
+applyTheme(localStorage.getItem("theme") || null);
+
+// ── run list (nav rail) ─────────────────────────────────────────────────
+const STATUS_PILL = {
+  running: ["pill-running", "Running"],
+  pending_approval: ["pill-review", "Needs review"],
+  completed: ["pill-done", "Completed"],
+  failed: ["pill-failed", "Failed"],
+};
+function statusPill(status) {
+  const [cls, label] = STATUS_PILL[status] || ["pill-neutral", status || "unknown"];
+  return `<span class="pill ${cls}"><span class="dot"></span>${escapeHtml(label)}</span>`;
+}
+function statusDotColor(status) {
+  return { running: "var(--accent)", pending_approval: "var(--amber)", completed: "var(--green)", failed: "var(--red)" }[status]
+    || "var(--text-faint)";
+}
+
 async function loadRuns() {
-  const runs = await fetch("/api/runs").then((r) => r.json());
+  const runs = (await fetchJSON("/api/runs")) || [];
+  $("#rail-count").textContent = runs.length ? `${runs.length}` : "";
   const box = $("#runs");
-  box.innerHTML = runs.length ? "" : '<div class="empty">No runs yet.</div>';
+  if (!runs.length) {
+    box.innerHTML = '<div class="tile-empty" style="padding:24px 16px;">No runs yet.<br><a href="/new">Start one →</a></div>';
+    return;
+  }
+  box.innerHTML = "";
   for (const r of runs) {
     const el = document.createElement("div");
-    el.className = "run" + (r.run_id === selected ? " active" : "");
-    const dur = r.total_duration_sec ? ` · ${r.total_duration_sec.toFixed(1)}s` : "";
+    el.className = "run-item" + (r.run_id === selected ? " active" : "");
+    const dur = r.total_duration_sec ? ` · ${fmtDur(r.total_duration_sec)}` : "";
     el.innerHTML =
-      `<div class="run-body">` +
-        `<div class="id">${r.run_id}</div>` +
-        `<div class="meta">${r.status} · ${r.rendered}/${r.scene_count} scenes${dur}</div>` +
+      `<div class="run-main">` +
+        `<div class="run-id">${escapeHtml(r.title || r.run_id)}</div>` +
+        `<div class="run-meta"><span class="status-dot" style="background:${statusDotColor(r.status)}"></span>` +
+        `${escapeHtml(r.status)} · ${r.rendered}/${r.scene_count} scenes${dur}</div>` +
       `</div>` +
-      `<button class="run-del" title="delete run">✕</button>`;
-    el.querySelector(".run-body").onclick = () => selectRun(r.run_id);
+      `<button class="run-del" type="button" title="Delete run" aria-label="Delete run ${escapeHtml(r.run_id)}">×</button>`;
+    el.querySelector(".run-main").onclick = () => selectRun(r.run_id);
     el.querySelector(".run-del").onclick = (e) => { e.stopPropagation(); deleteRun(r.run_id); };
     box.appendChild(el);
   }
 }
 
 async function deleteRun(runId) {
-  if (!confirm(`Delete run ${runId}? This removes its images + video.`)) return;
+  if (!confirm(`Delete run ${runId}? This removes its images and video.`)) return;
   const res = await fetch(`/api/runs/${runId}`, { method: "DELETE" });
   if (!res.ok) {
     const e = await res.json().catch(() => ({}));
-    setStatus("delete failed: " + (e.detail || res.status));
+    setStatus("Delete failed: " + (e.detail || res.status));
     return;
   }
-  if (selected === runId) {
-    selected = null;
-    stopPoll();
-    $("#detail").innerHTML = '<div class="empty">Select a run, or hit ▶ Run to start one.</div>';
-  }
+  if (selected === runId) { selected = null; stopPoll(); renderEmptyBoard(); }
   loadRuns();
 }
 
-// ── detail sections ──────────────────────────────────────────────────────────
-function citeStr(cite) { return cite && cite.length ? ` [${cite.join("][")}]` : ""; }
-
-function scriptSection(m) {
-  if (!m.scenes.length || !m.scenes.some((s) => s.narration)) return "";
-  const beats = m.scenes.map((s) =>
-    `<div class="beat"><span class="n">${s.index}</span>` +
-    `<span class="st">${s.shot_type}</span>` +
-    `<span>${escapeHtml(s.narration)}<span class="cite">${citeStr(s.cite)}</span></span></div>`
-  ).join("");
-  return `<h2>Script</h2><div class="script">${beats}</div>`;
+// ── tile helper (grid is the extension point: new panel = new tile()) ─────
+function tile(title, bodyHtml, w, h, opts) {
+  opts = opts || {};
+  const extra = opts.extraClass ? " " + opts.extraClass : "";
+  const hint = opts.hint ? `<span class="tile-hint">${escapeHtml(opts.hint)}</span>` : "";
+  const pad = opts.noPad ? " no-pad" : "";
+  return `<section class="tile ${w} ${h}${extra}">` +
+    `<header class="tile-head"><h2>${escapeHtml(title)}</h2>${hint}</header>` +
+    `<div class="tile-body${pad}">${bodyHtml}</div></section>`;
 }
 
-function sceneCard(s, reviewMode = false, busy = false) {
-  // Cache-key on the scene's last-updated time (NOT Date.now()): the URL stays stable across polls
-  // so the browser reuses the cached image (no per-poll re-fetch / blink), but changes when the
-  // scene is regenerated (scene_image bumps updated_at) so a new image still loads.
-  // A "fire spot" beat (frame_count > 1) shows two DISTINCT frames — render every frame so you can
-  // see both. Extra frames follow the img_i_1.png … naming convention off the base image_path.
-  let img;
+function renderEmptyBoard() {
+  $("#board").innerHTML =
+    `<div class="board-empty">` +
+      `<h2>Select a run</h2>` +
+      `<p>Pick a run from the list, or start a new one to see its live log, script, research and image gates here.</p>` +
+      `<a class="btn btn-primary" href="/new">+ New run</a>` +
+    `</div>`;
+}
+
+// ── tile builders ──────────────────────────────────────────────────────────
+function tileError(m) {
+  if (!m.error) return "";
+  return tile("Error", (
+    `<div class="error-msg">${escapeHtml(m.error.message)}</div>` +
+    (m.error.traceback ? `<pre class="error-trace">${escapeHtml(m.error.traceback)}</pre>` : "")
+  ), "w-12", "h-3", { extraClass: "accent-failed" });
+}
+
+function tileMeta(m, controlsHtml) {
+  const dur = m.total_duration_sec ? ` · ${fmtDur(m.total_duration_sec)}` : "";
+  const topic = m.topic ? `<div class="meta-line"><b>Topic</b> ${escapeHtml(m.topic)}</div>` : "";
+  const stats = m.stats || {};
+  const statsLine = stats.shots
+    ? `<div class="meta-line">Shots <b>${stats.shots}</b> · images <b>${stats.images_generated || 0}</b> gen`
+      + `${stats.images_cached ? ` / <b>${stats.images_cached}</b> cached` : ""}</div>`
+    : "";
+  const target = stats.duration_target_sec
+    ? `<div class="meta-line">Target <b>${fmtDur(stats.duration_target_sec)}</b>`
+      + `${stats.duration_actual_sec ? ` · actual <b>${fmtDur(stats.duration_actual_sec)}</b>` : ""}</div>`
+    : "";
+  const resumeNote = m.resume_note ? `<div class="meta-line">↻ ${escapeHtml(m.resume_note)}</div>` : "";
+  return tile("Run", (
+    `<div class="meta-title">${escapeHtml(m.title || "(untitled)")}</div>` +
+    `<div style="margin:4px 0 10px;">${statusPill(m.status)}</div>` +
+    `<div class="meta-line"><b>ID</b> ${escapeHtml(m.run_id)}</div>` +
+    `<div class="meta-line"><b>Images</b> ${escapeHtml(m.images_provider || "—")} · <b>Voice</b> ${escapeHtml(m.voice_provider || "—")}</div>` +
+    topic +
+    `<div class="meta-line"><b>Started</b> ${escapeHtml(m.started_at || "—")}${dur}</div>` +
+    statsLine + target + resumeNote +
+    `<hr class="meta-divider" />` +
+    controlsHtml
+  ), "w-4", "h-6");
+}
+
+function tileRubric(rubric) {
+  if (!rubric || !rubric.metrics) {
+    return tile("Script rubric", `<div class="tile-empty">Not recorded for this run.</div>`, "w-4", "h-6");
+  }
+  const met = rubric.metrics, th = rubric.thresholds || {};
+  const row = (name, val, pass, thresholdLabel) => {
+    const cls = pass === true ? "pass" : pass === false ? "fail" : "";
+    return `<div class="metric-row"><span class="metric-name">${escapeHtml(name)}</span>` +
+      `<span style="text-align:right;"><span class="metric-val ${cls}">${escapeHtml(val)}</span>` +
+      (thresholdLabel ? `<div class="metric-threshold">${escapeHtml(thresholdLabel)}</div>` : "") +
+      `</span></div>`;
+  };
+  const fq = met.first_question_sec;
+  const fqPass = th.max_first_question_sec != null ? (fq != null && fq <= th.max_first_question_sec) : null;
+  const msPass = th.max_mean_sentence_words != null ? met.mean_sentence_words <= th.max_mean_sentence_words : null;
+  const shortPass = th.min_short_sentence_pct != null ? met.short_sentence_pct >= th.min_short_sentence_pct : null;
+  const longPass = th.max_long_sentence_pct != null ? met.long_sentence_pct <= th.max_long_sentence_pct : null;
+
+  const okPill = rubric.ok
+    ? `<span class="pill pill-done"><span class="dot"></span>Pass</span>`
+    : `<span class="pill pill-failed"><span class="dot"></span>Fail</span>`;
+  const body =
+    `<div class="rubric-summary">${okPill}` +
+    `<span style="font-size:var(--fs-xs);color:var(--text-faint);">${met.words} words</span></div>` +
+    row("First question", fq != null ? `${fq.toFixed(0)}s` : "never", fqPass,
+        th.max_first_question_sec != null ? `max ${th.max_first_question_sec.toFixed(0)}s` : "") +
+    row("Mean sentence", `${met.mean_sentence_words.toFixed(1)}w`, msPass,
+        th.max_mean_sentence_words != null ? `max ${th.max_mean_sentence_words.toFixed(0)}w` : "") +
+    row("Short sentences", `${met.short_sentence_pct.toFixed(0)}%`, shortPass,
+        th.min_short_sentence_pct != null ? `min ${th.min_short_sentence_pct.toFixed(0)}%` : "") +
+    row("Long sentences", `${met.long_sentence_pct.toFixed(0)}%`, longPass,
+        th.max_long_sentence_pct != null ? `max ${th.max_long_sentence_pct.toFixed(0)}%` : "") +
+    row("2nd person / 1k", met.second_person_per_1k.toFixed(1), null, "") +
+    row("2nd person after 90s / 1k", met.second_person_after_90s_per_1k.toFixed(1), null, "") +
+    row("Numbers / 1k", met.numbers_per_1k.toFixed(1), null, "") +
+    (rubric.failures && rubric.failures.length
+      ? `<ul class="rubric-failures">${rubric.failures.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}</ul>`
+      : "");
+  return tile("Script rubric", body, "w-4", "h-6");
+}
+
+function tileStageTiming(m) {
+  const stages = (m.stats || {}).stage_seconds || {};
+  const entries = Object.entries(stages);
+  if (!entries.length) return "";
+  const max = Math.max(...entries.map(([, v]) => v), 0.001);
+  const body = entries.map(([name, sec]) =>
+    `<div class="stage-row"><div class="stage-label"><span class="name">${escapeHtml(name)}</span>` +
+    `<span class="val">${sec.toFixed(1)}s</span></div>` +
+    `<div class="stage-track"><div class="stage-fill" style="width:${(sec / max * 100).toFixed(1)}%"></div></div></div>`
+  ).join("");
+  return tile("Stage timing", body, "w-4", "h-6", { hint: "where the time goes" });
+}
+
+function tileLog(logText, running) {
+  const body = logText
+    ? `<pre class="log-pre" id="log-pre">${escapeHtml(logText)}</pre>`
+    : `<div class="tile-empty">No log output yet.</div>`;
+  return tile("Live log", body, "w-12", "h-6", { hint: running ? "streaming…" : "static" });
+}
+
+function tileScriptPrompt(scriptPrompt) {
+  const body = scriptPrompt
+    ? `<div class="prompt-block">${escapeHtml(scriptPrompt)}</div>`
+    : `<div class="tile-empty">Not recorded for this run.</div>`;
+  return tile("Script prompt", body, "w-6", "h-3", { hint: "generated the script" });
+}
+
+function tileResearch(m, sources, qcAvailable) {
+  if (!m.topic && !m.sources_path) return ""; // not applicable — canned demo run, no research stage
+  let body;
+  if (!sources || !sources.length) {
+    body = `<div class="tile-empty">No research recorded for this run.</div>`;
+  } else {
+    body = sources.map((s, i) =>
+      `<div class="source-item"><div class="t">[${i + 1}] ${escapeHtml(s.title)}` +
+      `${s.published ? ` · ${escapeHtml(String(s.published).slice(0, 10))}` : ""}</div>` +
+      `<div class="u"><a href="${escapeHtml(s.url)}" target="_blank" rel="noopener">${escapeHtml(s.url)}</a></div></div>`
+    ).join("");
+  }
+  const hint = qcAvailable ? "fact-checked" : "";
+  return tile(`Exa research${sources && sources.length ? ` (${sources.length})` : ""}`, body, "w-6", "h-3", { hint });
+}
+
+function tileScriptBeats(m) {
+  const withNarration = m.scenes.filter((s) => s.narration);
+  const body = withNarration.length
+    ? withNarration.map((s) => {
+        const cite = s.cite && s.cite.length ? ` <span class="cite">[${s.cite.join("][")}]</span>` : "";
+        return `<div class="beat-row"><span class="n">${s.index}</span><span class="st">${escapeHtml(s.shot_type)}</span>` +
+          `<span>${escapeHtml(s.narration)}${cite}</span></div>`;
+      }).join("")
+    : `<div class="tile-empty">Script not available yet.</div>`;
+  return tile("Script", body, "w-12", "h-5");
+}
+
+function sceneCard(s, promptText, editable, busy) {
+  let media;
   if (s.image_path) {
     const v = encodeURIComponent(s.updated_at || "0");
     const fc = Math.max(1, s.frame_count || 1);
     const urls = [s.image_path];
     for (let k = 1; k < fc; k++) urls.push(s.image_path.replace(/\.png$/, `_${k}.png`));
-    const frames = urls
-      .map((u, k) =>
-        `<span class="fr"><img src="${fileUrl(selected, u)}?v=${v}" alt="scene ${s.index} frame ${k + 1}" loading="lazy" />` +
-        (urls.length > 1 ? `<span class="n">${k + 1}</span>` : "") + `</span>`)
-      .join("");
-    img = `<div class="frames${urls.length > 1 ? "" : " one"}"${urls.length > 1 ? ' title="🔥 fire spot — both on-screen frames"' : ""}>${frames}</div>`;
+    const frames = urls.map((u, k) =>
+      `<span class="fr"><img src="${fileUrl(selected, u)}?v=${v}" alt="Scene ${s.index} frame ${k + 1}" loading="lazy" />` +
+      (urls.length > 1 ? `<span class="fr-n">${k + 1}</span>` : "") + `</span>`
+    ).join("");
+    media = `<div class="scene-frames${urls.length > 1 ? "" : " one"}">${frames}</div>`;
   } else {
-    img = `<div class="ph">${s.status === "started" ? "generating…" : "no image"}</div>`;
+    media = `<div class="scene-ph">${s.status === "started" ? "generating…" : s.status === "failed" ? "failed" : "no image yet"}</div>`;
   }
-  const dur = s.narration_duration_sec != null ? `${s.narration_duration_sec.toFixed(1)}s` : "—";
-  const callout = s.emphasis ? ` · 📌 ${escapeHtml(s.emphasis)}` : "";
-  const intense = (s.frame_count || 1) > 1 ? ` · 🔥 ${s.frame_count} frames`
-    : (s.intense ? " · 🔥" : "");
-  // In review mode each image gets an EDITABLE prompt + a Regenerate button: tweak the text (or
-  // leave it) and re-draw just this scene, then it re-pauses for another look.
+  const dur = fmtSec(s.narration_duration_sec);
+  const badges =
+    (s.emphasis ? `<span class="sc-badge callout">callout: ${escapeHtml(s.emphasis)}</span>` : "") +
+    ((s.frame_count || 1) > 1 ? `<span class="sc-badge">${s.frame_count} frames</span>` : "") +
+    (s.status === "failed" ? `<span class="sc-badge failed">failed</span>` : "");
   const dis = busy ? " disabled" : "";
-  const regen = reviewMode
-    ? `<div class="regen">` +
-        `<textarea class="regen-prompt" data-idx="${s.index}" rows="2"${dis} ` +
-        `title="edit the prompt for this scene, then Regenerate">${escapeHtml(s.image_prompt)}</textarea>` +
-        `<button class="regen-btn" data-idx="${s.index}"${dis} ` +
-        `title="re-draw this image using the prompt above">↻ Regenerate</button>` +
+  const promptSection = editable
+    ? `<div class="regen-box">` +
+        `<textarea class="input textarea" data-idx="${s.index}" rows="2"${dis} ` +
+        `aria-label="Prompt for scene ${s.index}" title="Edit the prompt, then Regenerate">${escapeHtml(promptText)}</textarea>` +
+        `<button class="btn regen-btn" data-idx="${s.index}"${dis} type="button" ` +
+        `title="Re-draw this image using the prompt above">Regenerate</button>` +
       `</div>`
-    : "";
-  // Outside review, show the (read-only) prompt line as before.
-  const promptLine = reviewMode ? "" : `<div class="prompt">▸ ${escapeHtml(s.image_prompt)}</div>`;
+    : `<div class="scene-prompt-label">Prompt</div><div class="scene-prompt">${escapeHtml(promptText)}</div>`;
   return (
-    `<div class="card">` +
-      `<div class="head"><span class="tag">${s.shot_type}</span>` +
-      `<span class="sub">#${s.index} · ${s.status} · ${dur}${s.ref_count ? ` · refs ${s.ref_count}` : ""}${callout}${intense}</span></div>` +
-      img +
-      (s.narration ? `<div class="narr">${escapeHtml(s.narration)}</div>` : "") +
-      promptLine +
-      regen +
+    `<div class="scene-card">` +
+      `<div class="sc-head"><span class="sc-tag">${escapeHtml(s.shot_type)}</span>` +
+      `<span>#${s.index} · ${escapeHtml(s.status)} · ${dur}${s.ref_count ? ` · refs ${s.ref_count}` : ""}</span></div>` +
+      (badges ? `<div class="sc-head">${badges}</div>` : "") +
+      media +
+      (s.narration ? `<div class="scene-narr">${escapeHtml(s.narration)}</div>` : "") +
+      promptSection +
     `</div>`
   );
 }
 
-// The sparse key-fact callouts that WILL be flashed on screen (post spacing-cap): what text, on
-// which scene's frame, at what time. Lets you see the callout plan at a glance before it renders.
-function calloutsSection(m) {
+function tileImageGrid(m, promptByIndex, editable, busy) {
+  const body = m.scenes.length
+    ? `<div class="scene-grid">${m.scenes.map((s) => {
+        const p = promptByIndex.get(s.index);
+        const promptText = (p && p.prompt) || s.image_prompt || "";
+        return sceneCard(s, promptText, editable, busy);
+      }).join("")}</div>`
+    : `<div class="tile-empty">No scenes recorded yet.</div>`;
+  return tile(`Images (${m.scenes.length}/${m.scene_count})`, body, "w-12", "h-7",
+    { hint: editable ? "review · regenerate before approving" : "" });
+}
+
+function tileCallouts(m) {
   const cs = m.callouts || [];
   if (!cs.length) return "";
-  const rows = cs
-    .map(
-      (c) =>
-        `<li>📌 <strong>${escapeHtml(c.text)}</strong>` +
-        ` <span class="sub">— scene #${c.scene_index} · frame 1 · ${(c.start_sec || 0).toFixed(1)}s</span></li>`
-    )
-    .join("");
-  return `<h2>Planned callouts (${cs.length})</h2><ul class="callouts">${rows}</ul>`;
+  const body = `<ul class="callout-list">${cs.map((c) =>
+    `<li><span class="txt">${escapeHtml(c.text)}</span>` +
+    `<span class="where">scene #${c.scene_index} · ${c.start_sec.toFixed(1)}s</span></li>`
+  ).join("")}</ul>`;
+  return tile(`Planned callouts (${cs.length})`, body, "w-4", "h-3");
 }
 
-async function sourcesSection(m) {
-  if (!m.sources_path) return "";
-  let sources;
-  try { sources = await fetch(fileUrl(m.run_id, m.sources_path)).then((r) => r.json()); }
-  catch { return ""; }
-  if (!Array.isArray(sources) || !sources.length) return "";
-  const items = sources.map((s, i) =>
-    `<div class="src"><div class="t">[${i + 1}] ${escapeHtml(s.title)}` +
-    `${s.published ? ` · ${escapeHtml(String(s.published).slice(0, 10))}` : ""}</div>` +
-    `<div class="u"><a href="${escapeHtml(s.url)}" target="_blank" rel="noopener">${escapeHtml(s.url)}</a></div></div>`
-  ).join("");
-  const qc = m.qc_path
-    ? ` <a href="${fileUrl(m.run_id, m.qc_path)}" target="_blank" rel="noopener">(fact-check qc.md)</a>` : "";
-  return `<h2>Exa sources (${sources.length})${qc}</h2>${items}`;
-}
-
-async function renderDetail(runId) {
-  const [m, log] = await Promise.all([
-    fetch(`/api/runs/${runId}`).then((r) => (r.ok ? r.json() : null)),
-    fetch(`/api/runs/${runId}/log`).then((r) => r.text()),
-  ]);
-  if (!m) return;
-  const failedTag = m.status === "failed" ? ' <span class="tag failed">failed</span>' : "";
-  const dur = m.total_duration_sec ? ` · ${m.total_duration_sec.toFixed(1)}s` : "";
-  const topic = m.topic ? ` · topic: ${escapeHtml(m.topic)}` : "";
-
-  const reedit = m.reedit || {};
-  const resume = m.resume || {};
-  const approval = m.approval || {};
-  const reviewBusy = !!(approval.assembling || approval.regenerating);
-
-  let html =
-    `<div><strong>${escapeHtml(m.title)}</strong>${failedTag}</div>` +
-    `<div class="sub">${m.run_id} · ${m.status}${dur} · images=${m.images_provider} voice=${m.voice_provider}${topic}</div>`;
-  if (m.resume_note) html += `<div class="sub">↻ ${escapeHtml(m.resume_note)}</div>`;
-
-  // Human-in-the-loop review gate: all images are generated but NOTHING is assembled until you
-  // approve. Review the images below, regenerate any you don't like, then Approve to compile.
-  if (approval.available) {
-    const note = approval.assembling
-      ? "assembling the video…"
-      : approval.regenerating
-      ? "regenerating an image…"
-      : "review the images below · regenerate any you don't like · nothing is compiled until you approve";
-    html +=
-      `<div class="reedit review">` +
-        `<button id="approve-btn"${reviewBusy ? " disabled" : ""} title="assemble the final video from these images">✓ Approve & Assemble</button>` +
-        `<span class="sub" id="approve-status">${note}</span>` +
-      `</div>`;
-  }
-
-  // Re-run: start a brand-new run from scratch (new script + new images) reusing this run's topic,
-  // image models, and voice. Disabled while this run is still going.
-  {
-    const running = m.status === "running";
-    html +=
-      `<div class="reedit">` +
-        `<button id="rerun-btn"${running ? " disabled" : ""} title="start a fresh run (new script + new images) with the same topic, models, and voice">⟳ Re-run</button>` +
-        `<span class="sub">${running ? "run in progress…" : "regenerates everything from scratch as a new run"}</span>` +
-      `</div>`;
-  }
-
-  // Resume control: pick a stopped/failed run back up, reusing the frames already generated.
-  if (resume.available || resume.running) {
-    const running = resume.running;
-    html +=
-      `<div class="reedit">` +
-        `<button id="resume-btn"${running ? " disabled" : ""} title="reuse frames on disk, generate the rest, reassemble">▶ Resume</button>` +
-        `<label class="sub"><input type="checkbox" id="resume-subs" checked${running ? " disabled" : ""} /> subtitles</label>` +
-        `<span class="sub" id="resume-status">${running ? "resuming… reusing existing frames" : "picks up from where it stopped"}</span>` +
-      `</div>`;
-  }
-
-  // Re-edit control: reruns only the Cartesia TTS + retimed cuts on the images already on disk.
-  if (reedit.available) {
-    const running = reedit.running;
-    html +=
-      `<div class="reedit">` +
-        `<button id="reedit-btn"${running ? " disabled" : ""} title="fresh Cartesia narration + retimed image/caption cuts (no image regen)">↻ Re-edit</button>` +
-        `<label class="sub">speed <input type="text" id="reedit-speed" value="0.88"${running ? " disabled" : ""} /></label>` +
-        `<span class="sub" id="reedit-status">${running ? "re-editing… new narration + timeline" : "reuses images · new Cartesia audio"}</span>` +
-      `</div>`;
-  }
-
-  // Re-edited output takes precedence; the original stays available below it.
-  const reeditLog = (reedit.running || reedit.video)
-    ? await fetch(fileUrl(runId, "reassemble.log")).then((r) => (r.ok ? r.text() : "")).catch(() => "")
-    : "";
+async function tileVideoThumb(m, reedit) {
+  const blocks = [];
   if (reedit.video) {
-    // Bust cache on the re-edit log LENGTH (stable once the re-edit is done, changes on a new one)
-    // rather than Date.now() so the player doesn't reload every poll.
-    html += `<h2>Re-edited video (v2)</h2>` +
-      `<video data-key="v2" controls src="${fileUrl(runId, reedit.video)}?v=${reeditLog.length}"></video>`;
+    blocks.push(`<div class="media-block"><h3>Re-edited video (v2)</h3>` +
+      `<video data-key="v2" controls src="${fileUrl(m.run_id, reedit.video)}"></video></div>`);
   }
   if (m.video_path) {
-    const label = reedit.video ? "Original video" : "Final video";
-    html += `<h2>${label}</h2><video data-key="main" controls src="${fileUrl(runId, m.video_path)}"></video>`;
+    blocks.push(`<div class="media-block"><h3>${reedit.video ? "Original video" : "Final video"}</h3>` +
+      `<video data-key="main" controls src="${fileUrl(m.run_id, m.video_path)}"></video></div>`);
   }
+  if (m.thumbnail_path) {
+    blocks.push(`<div class="media-block"><h3>Thumbnail</h3>` +
+      `<img class="thumb" src="${fileUrl(m.run_id, m.thumbnail_path)}?v=${encodeURIComponent(m.updated_at || "")}" alt="Thumbnail" /></div>`);
+  }
+  if (!blocks.length) return "";
+  return tile("Output", blocks.join(""), "w-8", "h-5");
+}
 
-  // Thumbnail: a focal image + big title overlay. Show it (if made) + a form to (re)generate it.
-  const thumb = m.thumbnail || {};
+// ── controls (approve / regenerate / rerun / resume / reedit / thumbnail) ──
+function controlsHtml(m, reedit, resume, approval, thumb) {
+  const parts = [];
+  if (approval.available) {
+    const note = approval.assembling ? "Assembling the video…"
+      : approval.regenerating ? "Regenerating an image…"
+      : `Awaiting review — review the images below, then approve.`;
+    const busy = approval.assembling || approval.regenerating;
+    parts.push(
+      `<div class="action-block">` +
+        `<button id="approve-btn" class="btn btn-primary"${busy ? " disabled" : ""} type="button">Approve &amp; assemble</button>` +
+        `<div class="action-note warn">${escapeHtml(note)}</div>` +
+      `</div>`
+    );
+  }
+  {
+    const running = m.status === "running";
+    parts.push(
+      `<div class="action-block">` +
+        `<button id="rerun-btn" class="btn"${running ? " disabled" : ""} type="button" ` +
+        `title="Start a fresh run: new script, new images, same topic/models/voice">Re-run</button>` +
+        `<div class="action-note">${running ? "Run in progress…" : "Fresh script + images, same settings"}</div>` +
+      `</div>`
+    );
+  }
+  if (resume.available || resume.running) {
+    parts.push(
+      `<div class="action-block">` +
+        `<button id="resume-btn" class="btn"${resume.running ? " disabled" : ""} type="button">Resume</button> ` +
+        `<label style="font-size:var(--fs-xs);"><input type="checkbox" id="resume-subs" checked${resume.running ? " disabled" : ""} /> subtitles</label>` +
+        `<div class="action-note">${resume.running ? "Resuming… reusing existing frames" : "Reuse frames on disk, finish the rest"}</div>` +
+      `</div>`
+    );
+  }
+  if (reedit.available) {
+    parts.push(
+      `<div class="action-block">` +
+        `<button id="reedit-btn" class="btn"${reedit.running ? " disabled" : ""} type="button">Re-edit</button> ` +
+        `<label style="font-size:var(--fs-xs);">speed <input class="input" style="width:56px;display:inline-block;" type="text" id="reedit-speed" value="0.88"${reedit.running ? " disabled" : ""} /></label>` +
+        `<div class="action-note">${reedit.running ? "Re-editing… new narration + timeline" : "Fresh Cartesia audio, same images"}</div>` +
+      `</div>`
+    );
+  }
   if (thumb.available || m.thumbnail_path) {
-    const tRunning = thumb.running;
-    if (m.thumbnail_path) {
-      html += `<h2>Thumbnail</h2>` +
-        `<img class="thumb" src="${fileUrl(runId, m.thumbnail_path)}?v=${encodeURIComponent(m.updated_at || "")}" alt="thumbnail" />`;
-    }
-    html +=
-      `<div class="reedit">` +
-        `<input type="text" id="thumb-text" placeholder="big title words" ` +
-        `value="${escapeHtml(m.title || "")}"${tRunning ? " disabled" : ""} />` +
-        `<button id="thumb-btn"${tRunning ? " disabled" : ""} title="generate a thumbnail (focal image + big title)">` +
-        `🖼 ${m.thumbnail_path ? "Regenerate" : "Generate"} thumbnail</button>` +
-        `<span class="sub" id="thumb-status">${tRunning ? "generating thumbnail…" : "focal image + big title overlay"}</span>` +
-      `</div>`;
+    parts.push(
+      `<div class="action-block">` +
+        `<input class="input" style="margin-bottom:6px;" type="text" id="thumb-text" placeholder="Big title words" ` +
+        `value="${escapeHtml(m.title || "")}"${thumb.running ? " disabled" : ""} />` +
+        `<button id="thumb-btn" class="btn"${thumb.running ? " disabled" : ""} type="button">` +
+        `${m.thumbnail_path ? "Regenerate" : "Generate"} thumbnail</button>` +
+        `<div class="action-note">${thumb.running ? "Generating…" : "Focal image + title overlay"}</div>` +
+      `</div>`
+    );
   }
-  if (reeditLog) {
-    html += `<h2>Re-edit log</h2><pre id="relog">${escapeHtml(reeditLog)}</pre>`;
-  }
-  if (m.error) {
-    html += `<div class="err"><strong>Error:</strong> ${escapeHtml(m.error.message)}` +
-            `<pre>${escapeHtml(m.error.traceback || "")}</pre></div>`;
-  }
-  html += scriptSection(m);
-  html += calloutsSection(m);
-  html += `<h2>Scenes (${m.scenes.length}/${m.scene_count})</h2>`;
-  // Show the per-scene Regenerate controls whenever the run is editable — at the review gate AND on
-  // a finished run (regenerating an image drops it back into the gate so Approve rebuilds the video).
-  const reviewMode = !!approval.editable;
-  html += `<div class="scenes">${m.scenes.map((s) => sceneCard(s, reviewMode, reviewBusy)).join("")}</div>`;
-  html += await sourcesSection(m);
-  html += `<h2>Log</h2><pre id="log">${escapeHtml(log)}</pre>`;
+  return parts.join("") || `<div class="action-note">No actions available for this run.</div>`;
+}
 
-  // Preserve existing <video> elements across the re-render: rebuilding innerHTML every poll would
-  // destroy + recreate the player, making it reload and flicker. Snapshot the current videos, and
-  // after the swap re-use any whose src is unchanged (keeps the loaded media + playback position).
+// ── main render ─────────────────────────────────────────────────────────
+async function renderBoard(runId) {
+  const [m, log, prompts, rubric] = await Promise.all([
+    fetchJSON(`/api/runs/${runId}`),
+    fetchText(`/api/runs/${runId}/log`),
+    fetchJSON(`/api/runs/${runId}/prompts`),
+    fetchJSON(`/api/runs/${runId}/rubric`),
+  ]);
+  if (!m) { renderEmptyBoard(); return; }
+
+  const reedit = m.reedit || { available: false, video: null, running: false };
+  const resume = m.resume || { available: false, running: false };
+  const approval = m.approval || { available: false, editable: false, assembling: false, regenerating: false };
+  const thumb = m.thumbnail || { available: false, running: false };
+  const reviewBusy = !!(approval.assembling || approval.regenerating);
+
+  let sources = null;
+  if (m.sources_path) sources = await fetchJSON(fileUrl(runId, m.sources_path));
+  // Trust the manifest rather than an extra round-trip: the file/{name} route only supports GET,
+  // and the manifest only ever records qc_path once qc.md has actually been written to disk.
+  const qcAvailable = !!m.qc_path;
+
+  const promptByIndex = new Map(((prompts && prompts.image_prompts) || []).map((p) => [p.index, p]));
+  const scriptPrompt = prompts && prompts.script_prompt;
+
+  const tiles = [
+    tileError(m),
+    tileMeta(m, controlsHtml(m, reedit, resume, approval, thumb)),
+    tileRubric(rubric),
+    tileStageTiming(m),
+    tileLog(log, m.status === "running" || reviewBusy),
+    tileScriptPrompt(scriptPrompt),
+    tileResearch(m, sources, qcAvailable),
+    tileScriptBeats(m),
+    tileImageGrid(m, promptByIndex, !!approval.editable, reviewBusy),
+    tileCallouts(m),
+    await tileVideoThumb(m, reedit),
+  ].filter(Boolean);
+
+  // Preserve <video> elements across re-renders (same trick as before): rebuilding innerHTML every
+  // poll would destroy + recreate the player, causing a reload/flicker. Reuse ones whose src matches.
   const prevVideos = {};
-  $("#detail").querySelectorAll("video[data-key]").forEach((v) => { prevVideos[v.dataset.key] = v; });
-  $("#detail").innerHTML = html;
-  $("#detail").querySelectorAll("video[data-key]").forEach((nv) => {
+  $("#board").querySelectorAll("video[data-key]").forEach((v) => { prevVideos[v.dataset.key] = v; });
+  const prevLogScrolledToBottom = (() => {
+    const el = document.getElementById("log-pre");
+    if (!el) return true;
+    return el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+  })();
+
+  $("#board").innerHTML = tiles.join("");
+
+  $("#board").querySelectorAll("video[data-key]").forEach((nv) => {
     const ov = prevVideos[nv.dataset.key];
     if (ov && ov.getAttribute("src") === nv.getAttribute("src")) nv.replaceWith(ov);
   });
+  const logEl = document.getElementById("log-pre");
+  if (logEl && prevLogScrolledToBottom) logEl.scrollTop = logEl.scrollHeight;
 
-  const rb = document.getElementById("reedit-btn");
-  if (rb) rb.onclick = () => reeditRun(runId);
-  const sb = document.getElementById("resume-btn");
-  if (sb) sb.onclick = () => resumeRun(runId);
-  const rr = document.getElementById("rerun-btn");
-  if (rr) rr.onclick = () => rerunRun(runId);
-  const ab = document.getElementById("approve-btn");
-  if (ab) ab.onclick = () => approveRun(runId);
+  const ab = document.getElementById("approve-btn"); if (ab) ab.onclick = () => approveRun(runId);
+  const rr = document.getElementById("rerun-btn"); if (rr) rr.onclick = () => rerunRun(runId);
+  const sb = document.getElementById("resume-btn"); if (sb) sb.onclick = () => resumeRun(runId);
+  const rb = document.getElementById("reedit-btn"); if (rb) rb.onclick = () => reeditRun(runId);
+  const tb = document.getElementById("thumb-btn"); if (tb) tb.onclick = () => generateThumbnail(runId);
   document.querySelectorAll(".regen-btn").forEach(
     (b) => (b.onclick = () => regenerateScene(runId, parseInt(b.dataset.idx, 10)))
   );
-  const tb = document.getElementById("thumb-btn");
-  if (tb) tb.onclick = () => generateThumbnail(runId);
 
-  // Poll only while a job is actively working (render / regenerate / assemble / re-edit / resume /
-  // thumbnail). We deliberately do NOT poll an idle run parked at the review gate — a 1s re-render
-  // would wipe whatever you're typing into a scene's prompt box. Clicking a button restarts polling.
-  if (m.status === "running" || reedit.running || resume.running || reviewBusy || thumb.running)
+  // Poll only while a job is actively working — an idle review gate does NOT poll, so it never
+  // clobbers text mid-edit in a prompt box. Any action click re-enters renderBoard and resumes polling.
+  if (m.status === "running" || reedit.running || resume.running || reviewBusy || thumb.running) {
     schedulePoll(runId);
-  else { stopPoll(); loadRuns(); }
+  } else {
+    stopPoll();
+    loadRuns();
+  }
 }
 
-// Resume a stopped/failed run: reuse frames on disk, generate the rest, reassemble.
+// ── actions ────────────────────────────────────────────────────────────
 async function resumeRun(runId) {
-  const subsEl = document.getElementById("resume-subs");
-  const captions = subsEl ? subsEl.checked : true;
-  const btn = document.getElementById("resume-btn");
-  if (btn) btn.disabled = true;
-  setStatus(`resuming ${runId} …`);
+  const captions = document.getElementById("resume-subs")?.checked ?? true;
+  const btn = document.getElementById("resume-btn"); if (btn) btn.disabled = true;
+  setStatus(`Resuming ${runId}…`);
   const res = await fetch(`/api/runs/${runId}/resume`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ captions }),
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ captions }),
   });
   if (!res.ok) {
     const e = await res.json().catch(() => ({}));
-    setStatus("resume failed: " + (e.detail || res.status));
+    setStatus("Resume failed: " + (e.detail || res.status));
     if (btn) btn.disabled = false;
     return;
   }
-  await renderDetail(runId);  // picks up resume.running → begins polling
+  await renderBoard(runId);
 }
 
-// Re-edit a saved run: fresh Cartesia TTS + retimed cuts, reusing its images (no regen).
 async function reeditRun(runId) {
   const speedEl = document.getElementById("reedit-speed");
   const speed = Math.max(0.6, Math.min(1.5, parseFloat(speedEl && speedEl.value) || 0.88));
-  const rb = document.getElementById("reedit-btn");
-  if (rb) rb.disabled = true;
-  setStatus(`re-editing ${runId} @ ${speed}× …`);
+  const btn = document.getElementById("reedit-btn"); if (btn) btn.disabled = true;
+  setStatus(`Re-editing ${runId} @ ${speed}×…`);
   const res = await fetch(`/api/runs/${runId}/reassemble`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ speed }),
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ speed }),
   });
   if (!res.ok) {
     const e = await res.json().catch(() => ({}));
-    setStatus("re-edit failed: " + (e.detail || res.status));
-    if (rb) rb.disabled = false;
+    setStatus("Re-edit failed: " + (e.detail || res.status));
+    if (btn) btn.disabled = false;
     return;
   }
-  await renderDetail(runId);  // picks up reedit.running → begins polling until video_v2 appears
+  await renderBoard(runId);
 }
 
-// Re-run: spawn a brand-new run reusing this run's topic + providers + voice, then jump to it.
 async function rerunRun(runId) {
-  const btn = document.getElementById("rerun-btn");
-  if (btn) btn.disabled = true;
-  setStatus(`re-running ${runId} …`);
+  const btn = document.getElementById("rerun-btn"); if (btn) btn.disabled = true;
+  setStatus(`Re-running ${runId}…`);
   const res = await fetch(`/api/runs/${runId}/rerun`, { method: "POST" });
   if (!res.ok) {
     const e = await res.json().catch(() => ({}));
-    setStatus("re-run failed: " + (e.detail || res.status));
+    setStatus("Re-run failed: " + (e.detail || res.status));
     if (btn) btn.disabled = false;
     return;
   }
   const { run_id } = await res.json();
-  setStatus(`started ${run_id}`);
-  await selectRun(run_id);  // navigate to the fresh run and begin polling
+  setStatus(`Started ${run_id}`);
+  await selectRun(run_id);
 }
 
-// Approve a reviewed run: assemble the final video from the images already on disk.
 async function approveRun(runId) {
-  const btn = document.getElementById("approve-btn");
-  if (btn) btn.disabled = true;
-  setStatus(`assembling ${runId} …`);
+  const btn = document.getElementById("approve-btn"); if (btn) btn.disabled = true;
+  setStatus(`Assembling ${runId}…`);
   const res = await fetch(`/api/runs/${runId}/approve`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ captions: true }),
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ captions: true }),
   });
   if (!res.ok) {
     const e = await res.json().catch(() => ({}));
-    setStatus("approve failed: " + (e.detail || res.status));
+    setStatus("Approve failed: " + (e.detail || res.status));
     if (btn) btn.disabled = false;
     return;
   }
-  await renderDetail(runId);  // picks up approval.assembling → polls until the video appears
+  await renderBoard(runId);
 }
 
-// Regenerate one scene's image(s) during review — using the edited prompt in that scene's box (or
-// the original if untouched) — then keep waiting for approval.
 async function regenerateScene(runId, idx) {
-  const ta = document.querySelector(`.regen-prompt[data-idx="${idx}"]`);
-  const prompt = ta && ta.value.trim() ? ta.value.trim() : null;  // null → reuse the script's prompt
-  setStatus(`regenerating scene ${idx} …`);
+  const ta = document.querySelector(`.regen-btn[data-idx="${idx}"]`)?.previousElementSibling;
+  const prompt = ta && ta.value.trim() ? ta.value.trim() : null;
+  setStatus(`Regenerating scene ${idx}…`);
   const res = await fetch(`/api/runs/${runId}/regenerate`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
+    method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ scene_index: idx, prompt }),
   });
   if (!res.ok) {
     const e = await res.json().catch(() => ({}));
-    setStatus("regenerate failed: " + (e.detail || res.status));
+    setStatus("Regenerate failed: " + (e.detail || res.status));
     return;
   }
-  await renderDetail(runId);  // approval.regenerating → polls until the new image lands
+  await renderBoard(runId);
 }
 
-// Generate (or regenerate) a YouTube thumbnail: focal image + big title from the text box.
 async function generateThumbnail(runId) {
   const el = document.getElementById("thumb-text");
   const text = el && el.value.trim() ? el.value.trim() : null;
-  const btn = document.getElementById("thumb-btn");
-  if (btn) btn.disabled = true;
-  setStatus(`generating thumbnail for ${runId} …`);
+  const btn = document.getElementById("thumb-btn"); if (btn) btn.disabled = true;
+  setStatus(`Generating thumbnail for ${runId}…`);
   const res = await fetch(`/api/runs/${runId}/thumbnail`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text }),
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }),
   });
   if (!res.ok) {
     const e = await res.json().catch(() => ({}));
-    setStatus("thumbnail failed: " + (e.detail || res.status));
+    setStatus("Thumbnail failed: " + (e.detail || res.status));
     if (btn) btn.disabled = false;
     return;
   }
-  await renderDetail(runId);  // thumbnail.running → polls until the image lands
+  await renderBoard(runId);
 }
 
-function schedulePoll(runId) { stopPoll(); pollTimer = setTimeout(() => renderDetail(runId), 1000); }
+function schedulePoll(runId) { stopPoll(); pollTimer = setTimeout(() => renderBoard(runId), 1200); }
 function stopPoll() { if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; } }
 
 async function selectRun(runId) {
   selected = runId;
   stopPoll();
   loadRuns();
-  await renderDetail(runId);
+  await renderBoard(runId);
 }
 
-$("#run-btn").onclick = async () => {
-  const btn = $("#run-btn");
-  btn.disabled = true;
-  setStatus("starting…");
-  try {
-    const res = await fetch("/api/runs", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        topic: $("#topic").value.trim() || null,
-        images: $("#images").value,
-        voice: $("#voice").value,
-        captions: $("#captions").checked,
-      }),
-    });
-    if (!res.ok) {
-      const e = await res.json().catch(() => ({}));
-      setStatus("error: " + (e.detail || res.status));
-      return;
-    }
-    const { run_id } = await res.json();
-    setStatus("running " + run_id);
-    await selectRun(run_id);
-  } finally {
-    btn.disabled = false;
-  }
-};
-
+renderEmptyBoard();
 loadRuns();
 </script>
 </body>
