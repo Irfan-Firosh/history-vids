@@ -118,6 +118,41 @@ def test_resume_reuses_saved_narration_and_records_progress(tmp_path, monkeypatc
     assert rec.manifest.resume_note and "1/2" in rec.manifest.resume_note  # truthful progress
 
 
+def test_attach_script_artifacts_copies_prompt_and_rubric_into_run_dir(tmp_path):
+    """script_prompt.txt + rubric.json are written by make_script alongside storyboard.json, but
+    attach_script_artifacts's copy list only knew about the original three files — so on a real
+    pipeline run these two were generated and then left behind, and the dashboard's
+    /api/runs/{id}/prompts and /api/runs/{id}/rubric endpoints returned null forever."""
+    src_dir = tmp_path / "script_out"
+    src_dir.mkdir()
+    (src_dir / "storyboard.json").write_text("{}")
+    (src_dir / "sources.json").write_text("[]")
+    (src_dir / "qc.md").write_text("# qc")
+    (src_dir / "script_prompt.txt").write_text("the rendered LLM prompt")
+    (src_dir / "rubric.json").write_text('{"ok": true}')
+
+    rec = sp.RunRecorder.create(
+        tmp_path, title="t", images_provider="gemini",
+        voice_provider="say", scene_count=1, run_id="r",
+    )
+
+    sp.attach_script_artifacts(rec, src_dir / "storyboard.json")
+
+    # All five artifacts land in the run dir, not just the original three.
+    assert (rec.dir / "storyboard.json").is_file()
+    assert (rec.dir / "sources.json").is_file()
+    assert (rec.dir / "qc.md").is_file()
+    assert (rec.dir / "script_prompt.txt").read_text() == "the rendered LLM prompt"
+    assert (rec.dir / "rubric.json").read_text() == '{"ok": true}'
+
+    # ...and are recorded on the manifest, same as the original three.
+    assert rec.manifest.script_path == "storyboard.json"
+    assert rec.manifest.sources_path == "sources.json"
+    assert rec.manifest.qc_path == "qc.md"
+    assert rec.manifest.script_prompt_path == "script_prompt.txt"
+    assert rec.manifest.rubric_path == "rubric.json"
+
+
 def test_ref_capability_is_read_per_instance_not_per_provider_name(monkeypatch):
     """Agnes only sends a reference image when AGNES_IMG2IMG=1, so ref-capability must come from
     the instance. A name-based check claimed ref-conditioned consistency for the default Agnes

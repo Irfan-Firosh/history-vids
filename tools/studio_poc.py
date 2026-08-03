@@ -986,7 +986,13 @@ def attach_script_artifacts(rec: RunRecorder, storyboard_path: Path) -> None:
     """Copy a generated script's sibling artifacts into the run dir + record them on the manifest."""
     src_dir = Path(storyboard_path).parent
     copied: dict[str, Path] = {}
-    for name, key in (("storyboard.json", "script"), ("sources.json", "sources"), ("qc.md", "qc")):
+    for name, key in (
+        ("storyboard.json", "script"),
+        ("sources.json", "sources"),
+        ("qc.md", "qc"),
+        ("script_prompt.txt", "prompt"),
+        ("rubric.json", "rubric"),
+    ):
         p = src_dir / name
         if p.is_file():
             dest = rec.dir / name
