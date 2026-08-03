@@ -36,6 +36,7 @@ from studio.script_prompt import (  # noqa: E402
     SCRIPT_SYSTEM_PROMPT,
     build_callout_analysis_user_prompt,
     build_query_user_prompt,
+    build_repair_user_prompt,
     build_script_user_prompt,
 )
 
@@ -141,6 +142,7 @@ class LLMScriptProvider:
         self.model = model or os.environ.get("LLM_SCRIPT_MODEL", "gpt-oss:120b")
         self.temperature = temperature
         self.last_prompt: str | None = None  # full rendered prompt from the last generate() call
+        self.repair_ran = False  # did a rubric repair pass run on the last generate()?
 
     def _chat(self, system: str, user: str, temperature: float | None = None) -> str:
         import time
@@ -220,9 +222,40 @@ class LLMScriptProvider:
         # the callout pass must not pick a marker as an on-screen phrase, and storyboard.json/qc.md
         # should carry the same clean narration the TTS will speak.
         _strip_inline_citations(data)
+        data = self._repair_if_needed(data, log=print)
         self._apply_callout_analysis(data)  # a focused 2nd pass: pick callouts + flag intense beats
         storyboard = storyboard_from_dict(data)
         return storyboard, sources, data
+
+    def _repair_if_needed(self, data: dict, log) -> dict:
+        """One revision pass when a draft fails the craft rubric. Returns the data to use.
+
+        Runs BEFORE the callout pass so callouts are chosen on the final text. Exactly one attempt:
+        if the repair also fails, `build_and_save`'s gate refuses the render, which is the
+        deterministic check. A garbled repair degrades to the original draft rather than aborting —
+        the gate still gets the last word.
+        """
+        scenes = data.get("scenes")
+        if not isinstance(scenes, list) or not scenes:
+            return data
+        report = score_script([s.get("narration", "") for s in scenes])
+        if report.ok:
+            return data
+        log(f"rubric: draft failed ({len(report.failures)} issues) — one repair pass")
+        user = build_repair_user_prompt(json.dumps(data, ensure_ascii=False), report.failures)
+        self.repair_ran = True
+        try:
+            repaired = llm.parse_json_block(self._chat(SCRIPT_SYSTEM_PROMPT, user))
+        except Exception as exc:  # noqa: BLE001 — a bad repair must not lose the draft
+            log(f"  ⚠ repair pass failed to parse ({exc}); keeping the original draft")
+            return data
+        if not isinstance(repaired.get("scenes"), list) or not repaired["scenes"]:
+            log("  ⚠ repair pass returned no beats; keeping the original draft")
+            return data
+        _strip_inline_citations(repaired)
+        after = score_script([s.get("narration", "") for s in repaired["scenes"]])
+        log(f"  repair: {after.summary()}")
+        return repaired
 
     def _apply_callout_analysis(self, data: dict) -> None:
         """Second gpt-oss pass over the finished beats: choose sparse on-screen callouts (proper
@@ -404,7 +437,9 @@ def build_and_save(
     # Two paper-trail artifacts the dashboard exposes over the API (see dashboard/app.py): the exact
     # prompt sent to the script LLM, and the numeric rubric report — neither was persisted before.
     (out / "script_prompt.txt").write_text(provider.last_prompt or "")
-    (out / "rubric.json").write_text(rubric_report.model_dump_json(indent=2))
+    (out / "rubric.json").write_text(json.dumps(
+        {**rubric_report.model_dump(), "repair_ran": provider.repair_ran}, indent=2
+    ))
     return out
 
 

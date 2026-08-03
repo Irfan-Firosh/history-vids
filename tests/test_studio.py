@@ -1383,3 +1383,69 @@ def test_word_budget_uses_the_measured_axen_speaking_rate():
     assert WORDS_PER_MINUTE == 196.0
     assert target_words(7.5, 8.5) == 1568       # 8 min at the measured rate
     assert scenes_for_minutes(7.5, 8.5) == 52   # 1568 words / 30 words per beat
+
+
+def test_generate_repairs_a_failing_draft_exactly_once(monkeypatch):
+    # The rubric gate already blocks a bad script. Without a repair pass, every miss costs a full
+    # research + generation cycle and a manual re-run. One pass, then the gate.
+    from tools.make_script import LLMScriptProvider
+
+    # Build dicts directly — `json` is NOT imported in this test file (verified 2026-08-03) and
+    # the implementation serialises the draft itself, so a dict is the honest input here.
+    #
+    # 16 beats, not 8. `second_person_after_90s_per_1k` measures the region AFTER 90 seconds, so a
+    # fixture under ~294 words (90s at 196 wpm) has no such region and scores 0.0 no matter how
+    # much second person it contains. 8 beats x 25 words = 200 words = 61s and fails for that
+    # reason alone. This exact trap already shipped once in this project's plans — verified
+    # 2026-08-03 that 16 beats passes and 8 does not.
+    bad = {"title": "T", "scenes": [
+        {"narration": " ".join(["word"] * 30) + ".", "image_prompt": "x",
+         "shot_type": "concept", "cite": []} for _ in range(16)]}
+    good_text = (
+        '{"title": "T", "scenes": [' + ",".join(
+            '{"narration": "Why did they go? You would have gone too. In 1908 a team found 40 '
+            'hearths, each one still ringed with stones you could count.", "image_prompt": "x", '
+            '"shot_type": "concept", "cite": []}' for _ in range(16)) + "]}"
+    )
+
+    calls = []
+
+    def fake_chat(self, system, user):
+        calls.append(user)
+        return good_text
+
+    monkeypatch.setattr(LLMScriptProvider, "_chat", fake_chat)
+    p = LLMScriptProvider.__new__(LLMScriptProvider)
+    p.repair_ran = False
+    data = p._repair_if_needed(bad, log=lambda *a: None)
+
+    assert p.repair_ran is True
+    assert len(calls) == 1, "exactly one repair pass, never a loop"
+    assert "?" in " ".join(s["narration"] for s in data["scenes"])
+
+
+def test_generate_does_not_repair_a_passing_draft(monkeypatch):
+    from tools.make_script import LLMScriptProvider
+
+    # 16 beats, not 8 (the brief's own draft used 8 here — verified 2026-08-03 that 8 beats of
+    # this narration is only 176 words / ~54s, which has NO region after the 90s mark, so
+    # second_person_after_90s_per_1k scores 0.0 and fails the rubric's own min-8.0 floor. That
+    # made this "passing draft" fixture actually a FAILING one — the exact trap this task warns
+    # about, shipping inside the brief meant to guard against it. 16 beats (352 words / ~108s)
+    # genuinely passes; 14 is the measured minimum for this exact text.
+    good_scenes = [{
+        "narration": "Why did they go? They went. In 1908 a team found 40 hearths, each one "
+                     "still ringed with stones you could count.",
+        "image_prompt": "x", "shot_type": "concept", "cite": [],
+    } for _ in range(16)]
+
+    def fake_chat(self, system, user):
+        raise AssertionError("must not call the LLM when the draft already passes")
+
+    monkeypatch.setattr(LLMScriptProvider, "_chat", fake_chat)
+    p = LLMScriptProvider.__new__(LLMScriptProvider)
+    p.repair_ran = False
+    data = p._repair_if_needed({"title": "T", "scenes": good_scenes}, log=lambda *a: None)
+
+    assert p.repair_ran is False
+    assert data["scenes"] == good_scenes
