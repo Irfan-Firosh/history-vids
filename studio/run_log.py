@@ -130,6 +130,10 @@ class RunManifest(BaseModel):
     script_path: str | None = None
     sources_path: str | None = None
     qc_path: str | None = None
+    # Optional so a manifest recorded before these two artifacts existed still loads: absent
+    # fields fall back to this default rather than failing validation.
+    script_prompt_path: str | None = None
+    rubric_path: str | None = None
     settings: RunSettings = RunSettings()  # the operator's choices — re-run/resume read this back
     stats: RunStats = RunStats()  # measured facts, filled in as the run progresses
 
@@ -256,6 +260,8 @@ class RunRecorder:
         script: Path | None = None,
         sources: Path | None = None,
         qc: Path | None = None,
+        prompt: Path | None = None,
+        rubric: Path | None = None,
     ) -> None:
         """Record copied script-stage artifacts (rel paths) so the dashboard can show them."""
         updates: dict[str, object] = {"updated_at": _now()}
@@ -267,6 +273,10 @@ class RunRecorder:
             updates["sources_path"] = self._rel(sources)
         if qc is not None:
             updates["qc_path"] = self._rel(qc)
+        if prompt is not None:
+            updates["script_prompt_path"] = self._rel(prompt)
+        if rubric is not None:
+            updates["rubric_path"] = self._rel(rubric)
         self._replace(**updates)
 
     def scene_image(self, index: int, image_path: Path) -> None:
