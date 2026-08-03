@@ -201,7 +201,7 @@ class LLMScriptProvider:
         return queries, sources
 
     def generate(
-        self, topic: str, num_scenes: int = 45, min_minutes: float = 6.0, max_minutes: float = 9.0
+        self, topic: str, num_scenes: int = 52, min_minutes: float = 7.5, max_minutes: float = 8.5
     ):
         # A longer video needs more real facts — scale research depth with the beat count.
         num_queries = min(12, max(6, num_scenes // 6))

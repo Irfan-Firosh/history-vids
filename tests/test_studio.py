@@ -1094,6 +1094,37 @@ def test_generate_records_the_full_rendered_prompt_on_the_provider(monkeypatch):
     assert SCRIPT_SYSTEM_PROMPT in prov.last_prompt  # the system prompt is captured too
 
 
+def test_generate_defaults_to_the_axen_pole_band(monkeypatch):
+    # generate() is reachable directly, not just through build_and_save (which always passes an
+    # explicit band) — so a caller relying on its defaults must still land on the 7.5-8.5 minute /
+    # 1568-word Axen-pole budget, not the old 6-9 minute / 45-beat band this task exists to fix.
+    from tools.make_script import LLMScriptProvider
+
+    class OneSource:
+        name = "fake"
+
+        def search(self, query, num_results=6):
+            return [ResearchSource(title="T", url="http://a", snippet="s")]
+
+    seen: list[str] = []
+
+    def fake_chat(system, user, temp=None):
+        seen.append(user)
+        if system is QUERY_SYSTEM_PROMPT:
+            return '{"queries": ["q1"]}'
+        if system is CALLOUT_ANALYSIS_SYSTEM_PROMPT:
+            return '{"callouts": [], "intense": []}'
+        return '{"title": "T", "scenes": [{"narration": "n", "image_prompt": "p", "cite": [1]}]}'
+
+    prov = LLMScriptProvider(research=OneSource())
+    monkeypatch.setattr(prov, "_chat", fake_chat)
+    prov.generate("topic")  # no band, no scene count — must not fall back to the stale defaults
+    script_prompt = seen[1]
+    assert "7.5-8.5 minute" in script_prompt
+    assert "1568 words" in script_prompt
+    assert "52 beats" in script_prompt
+
+
 def test_build_and_save_persists_script_prompt_and_rubric(monkeypatch, tmp_path):
     # End-to-end: a topic → the script-generation stage must leave a paper trail on disk for both
     # gaps the dashboard needs to close — the exact LLM prompt, and the numeric rubric report.
