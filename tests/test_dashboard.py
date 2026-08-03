@@ -182,6 +182,49 @@ def test_rerun_missing_run_is_404(client):
     assert client.post("/api/runs/nope/rerun").status_code == 404
 
 
+def test_rerun_inherits_captions_off_from_manifest_settings(client, monkeypatch):
+    """A re-run must inherit the original run's captions choice from `settings`, not silently
+    default to True — this is the gap task 1.2 closes (see dashboard/app.py:328's old comment)."""
+    run = dash.RUNS_DIR / "20260101-000000"
+    m = json.loads((run / "run.json").read_text())
+    m["settings"] = {"captions": False}
+    (run / "run.json").write_text(json.dumps(m))
+
+    captured: dict = {}
+
+    class FakeProc:
+        def poll(self):
+            return None
+
+    def fake_popen(cmd, *a, **k):
+        captured["cmd"] = cmd
+        return FakeProc()
+
+    monkeypatch.setattr(dash.subprocess, "Popen", fake_popen)
+    r = client.post("/api/runs/20260101-000000/rerun")
+    assert r.status_code == 201
+    assert "--no-captions" in captured["cmd"]
+
+
+def test_rerun_defaults_captions_on_when_settings_absent(client, monkeypatch):
+    """An old manifest recorded before this change has no `settings` key at all — the re-run must
+    still work and fall back to captions=True rather than crashing or silently disabling them."""
+    captured: dict = {}
+
+    class FakeProc:
+        def poll(self):
+            return None
+
+    def fake_popen(cmd, *a, **k):
+        captured["cmd"] = cmd
+        return FakeProc()
+
+    monkeypatch.setattr(dash.subprocess, "Popen", fake_popen)
+    r = client.post("/api/runs/20260101-000000/rerun")
+    assert r.status_code == 201
+    assert "--no-captions" not in captured["cmd"]
+
+
 # ── review gate (HITL: pause after images → approve to assemble / regenerate one image) ──
 def _mark_pending_approval(run_dir, images_provider="gemini/agnes"):
     m = json.loads((run_dir / "run.json").read_text())
@@ -457,3 +500,71 @@ def test_resume_reconstructs_providers_and_flags(client, monkeypatch):
     assert cmd[cmd.index("--concept-model") + 1] == "agnes"
     assert cmd[cmd.index("--fallback") + 1] == "agnes"  # different reliable model than gemini char
     assert cmd[cmd.index("--voice") + 1] == "cartesia"
+
+
+def test_resume_defaults_captions_from_manifest_settings_when_omitted(client, monkeypatch):
+    """Resume without an explicit `captions` in the request body must fall back to the ORIGINAL
+    run's recorded settings, not a hardcoded True — the gap task 1.2 closes."""
+    run = dash.RUNS_DIR / "20260101-000000"
+    _mark_failed_with_storyboard(run, images_provider="gemini/agnes")
+    m = json.loads((run / "run.json").read_text())
+    m["settings"] = {"captions": False}
+    (run / "run.json").write_text(json.dumps(m))
+
+    captured: dict = {}
+
+    class FakeProc:
+        def poll(self):
+            return None
+
+    def fake_popen(cmd, *a, **k):
+        captured["cmd"] = cmd
+        return FakeProc()
+
+    monkeypatch.setattr(dash.subprocess, "Popen", fake_popen)
+    r = client.post("/api/runs/20260101-000000/resume", json={})
+    assert r.status_code == 202
+    assert "--no-captions" in captured["cmd"]
+
+
+def test_resume_explicit_captions_overrides_manifest_settings(client, monkeypatch):
+    """An explicit `captions` in the resume request still wins over the manifest's settings."""
+    run = dash.RUNS_DIR / "20260101-000000"
+    _mark_failed_with_storyboard(run, images_provider="gemini/agnes")
+    m = json.loads((run / "run.json").read_text())
+    m["settings"] = {"captions": False}
+    (run / "run.json").write_text(json.dumps(m))
+
+    captured: dict = {}
+
+    class FakeProc:
+        def poll(self):
+            return None
+
+    def fake_popen(cmd, *a, **k):
+        captured["cmd"] = cmd
+        return FakeProc()
+
+    monkeypatch.setattr(dash.subprocess, "Popen", fake_popen)
+    r = client.post("/api/runs/20260101-000000/resume", json={"captions": True})
+    assert r.status_code == 202
+    assert "--no-captions" not in captured["cmd"]
+
+
+# ── settings persistence (dashboard is the consumer of RunSettings/RunStats) ───
+def test_trigger_run_persists_settings_onto_manifest(client, monkeypatch):
+    """_spawn_run must write the operator's choices onto the new run's manifest at start, so a
+    later re-run/resume of THIS run can recover them (task 1.2)."""
+
+    class FakeProc:
+        def poll(self):
+            return None
+
+    monkeypatch.setattr(dash.subprocess, "Popen", lambda *a, **k: FakeProc())
+    r = client.post("/api/runs", json={"images": "agnes", "voice": "cartesia", "captions": False})
+    assert r.status_code == 201
+    run_id = r.json()["run_id"]
+    manifest = json.loads((dash.RUNS_DIR / run_id / "run.json").read_text())
+    assert manifest["settings"]["captions"] is False
+    assert manifest["settings"]["images_provider"] == "agnes"
+    assert manifest["settings"]["voice"] == "cartesia"
