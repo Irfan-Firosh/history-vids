@@ -300,15 +300,12 @@ def _qc_report(data: dict, sources: list[ResearchSource]) -> str:
     return "\n".join(lines)
 
 
-#: Measured speaking rate of the production voice (Cartesia ``sonic-2`` at the default
-#: ``CARTESIA_SPEED=0.88``), from two completed runs: 394 words / 132.7s = 178 wpm and
-#: 849 words / 270.2s = 189 wpm. Scale roughly linearly if ``CARTESIA_SPEED`` changes.
-WORDS_PER_MINUTE = 183.0
+WORDS_PER_MINUTE = 196.0  # measured: Axen 195.6 wpm (04-video-forensics.md section 7)
 
-#: Words of narration per beat. A beat is ONE held shot and ``studio.narration.MIN_FRAME_HOLD``
-#: wants every frame on screen ≥ 8s, so a beat should run ~10s ⇒ ~30 words at WORDS_PER_MINUTE.
-#: The model used to be sized in SECONDS ("~8-16s each") and delivered ~19-word / 6s beats — it
-#: cannot judge spoken duration, but it can count words, so all sizing now goes through words.
+#: Words of narration per beat. A beat is NOT one held shot — ``studio.shots.plan_shots``
+#: subdivides each beat at clause boundaries into ~2.2s shots, so this controls how many IMAGES a
+#: run generates, not the cut rate. ~30 words keeps image count near 52 for an 8-minute script.
+#: Sizing goes through words, not seconds: the model cannot judge spoken duration but can count.
 WORDS_PER_BEAT = 30
 
 
@@ -334,7 +331,7 @@ def scenes_for_minutes(
 
 
 def build_and_save(
-    topic: str, scenes: int | None = None, min_minutes: float = 6.0, max_minutes: float = 9.0,
+    topic: str, scenes: int | None = None, min_minutes: float = 7.5, max_minutes: float = 8.5,
     log=print, skip_rubric: bool = False,
 ) -> Path:
     """topic → research → script; write storyboard.json/sources.json/qc.md. Returns the output dir.
@@ -415,8 +412,8 @@ def main() -> None:
     load_dotenv()
     ap = argparse.ArgumentParser()
     ap.add_argument("topic")
-    ap.add_argument("--min-minutes", type=float, default=6.0)
-    ap.add_argument("--max-minutes", type=float, default=9.0)
+    ap.add_argument("--min-minutes", type=float, default=7.5)
+    ap.add_argument("--max-minutes", type=float, default=8.5)
     ap.add_argument("--scenes", type=int, default=None, help="override the beat count (else derived)")
     ap.add_argument(
         "--skip-rubric", action="store_true",

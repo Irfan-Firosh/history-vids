@@ -164,21 +164,22 @@ def build_callout_analysis_user_prompt(beats: list[dict]) -> str:
 
 def build_script_user_prompt(
     topic: str, research_brief: str, num_scenes: int,
-    min_minutes: float = 6.0, max_minutes: float = 9.0,
+    min_minutes: float = 7.5, max_minutes: float = 8.5,
     total_words: int | None = None, words_per_beat: int = 30,
 ) -> str:
     """The per-run script request.
 
-    Length is stated as a **word budget**, not just minutes: the narrator speaks ~183 words/minute,
+    Length is stated as a **word budget**, not just minutes: the narrator speaks ~196 words/minute,
     and a model cannot judge spoken seconds but can count words. Asking in seconds produced ~19-word
     beats and a 4.5-minute video for a 6-9 minute request.
     """
-    budget = total_words if total_words is not None else round((min_minutes + max_minutes) / 2 * 183)
+    budget = total_words if total_words is not None else round((min_minutes + max_minutes) / 2 * 196)
     return (
         f"TOPIC: {topic}\n"
         f"TARGET: a {min_minutes:g}-{max_minutes:g} minute narration — roughly {num_scenes} beats "
-        f"(each one held shot, ~8-16 seconds spoken). Land inside that time band.\n"
-        f"LENGTH BUDGET (hard target — the narrator speaks about 183 words per minute): write "
+        f"(each beat is subdivided into ~2.2s shots at clause boundaries). Land inside that time "
+        f"band.\n"
+        f"LENGTH BUDGET (hard target — the narrator speaks about 196 words per minute): write "
         f"about {budget} words of narration IN TOTAL, i.e. about {words_per_beat} words per beat "
         f"(2-3 full sentences each). Count as you go. A script materially under {budget} words "
         f"comes out too short and is a failed script — write every beat to full length rather than "

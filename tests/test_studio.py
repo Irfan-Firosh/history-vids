@@ -1342,3 +1342,13 @@ def test_hf_endpoints_try_router_then_classic():
 
 def test_hf_request_body_is_text_to_image():
     assert huggingface.request_body("hi") == {"inputs": "hi"}
+
+
+def test_word_budget_uses_the_measured_axen_speaking_rate():
+    # 04-video-forensics.md section 7: Axen speaks 195.6 wpm. The old 183.0 under-budgeted every
+    # script by ~12% before the model under-delivered against it.
+    from tools.make_script import WORDS_PER_MINUTE, scenes_for_minutes, target_words
+
+    assert WORDS_PER_MINUTE == 196.0
+    assert target_words(7.5, 8.5) == 1568       # 8 min at the measured rate
+    assert scenes_for_minutes(7.5, 8.5) == 52   # 1568 words / 30 words per beat
