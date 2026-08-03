@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from studio.run_log import RunManifest, RunRecorder, new_run_id
+from studio.run_log import RunManifest, RunRecorder, RunSettings, RunStats, new_run_id
 
 
 def _make(tmp_path, **over):
@@ -78,3 +78,41 @@ def test_runs_are_isolated_no_overwrite(tmp_path):
 def test_new_run_id_is_sortable_timestamp():
     rid = new_run_id()
     assert len(rid) == 15 and rid[8] == "-" and rid.replace("-", "").isdigit()
+
+
+def test_manifest_defaults_keep_old_run_json_loadable():
+    # Runs recorded before this change have no settings/stats keys; they must still parse.
+    m = RunManifest(
+        run_id="x", title="t", images_provider="agnes", voice_provider="cartesia",
+        status="completed", scene_count=3, started_at="2026-08-02T00:00:00",
+        updated_at="2026-08-02T00:00:00",
+    )
+    assert m.settings.captions is True
+    assert m.stats.shots == 0
+
+
+def test_settings_round_trip_through_json():
+    m = RunManifest(
+        run_id="x", title="t", images_provider="agnes", voice_provider="cartesia",
+        status="completed", scene_count=3, started_at="2026-08-02T00:00:00",
+        updated_at="2026-08-02T00:00:00",
+        settings=RunSettings(captions=False, min_minutes=7.5, max_minutes=8.5),
+        stats=RunStats(shots=208, images_cached=12, subtitle_backend="libass"),
+    )
+    again = RunManifest.model_validate_json(m.model_dump_json())
+    assert again.settings.captions is False
+    assert again.settings.min_minutes == 7.5
+    assert again.stats.shots == 208
+    assert again.stats.subtitle_backend == "libass"
+
+
+def test_set_settings_records_operator_choices(tmp_path):
+    """RunRecorder needs a public writer for settings (mirrors set_callouts/set_thumbnail) so a
+    caller outside studio/ (the dashboard) can persist the operator's choices without reaching
+    into the recorder's private _replace()."""
+    rec = _make(tmp_path, run_id="r6")
+    rec.set_settings(RunSettings(captions=False, images_provider="agnes", voice="cartesia"))
+    m = RunManifest.model_validate_json((rec.dir / "run.json").read_text())
+    assert m.settings.captions is False
+    assert m.settings.images_provider == "agnes"
+    assert m.settings.voice == "cartesia"

@@ -72,6 +72,37 @@ class CalloutPlan(BaseModel):
     start_sec: float
 
 
+class RunSettings(BaseModel):
+    """The operator's choices for a run, persisted so re-run and resume inherit them.
+
+    Without this, `dashboard/app.py` re-runs fell back to defaults and silently discarded the
+    captions choice the user made on the original run.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    captions: bool = True
+    min_minutes: float | None = None
+    max_minutes: float | None = None
+    images_provider: str = ""
+    voice: str = ""
+    shot_hold_sec: float | None = None
+
+
+class RunStats(BaseModel):
+    """Measured facts about a finished run — what the dashboard shows without reading the log."""
+
+    model_config = ConfigDict(frozen=True)
+
+    shots: int = 0
+    images_generated: int = 0
+    images_cached: int = 0
+    stage_seconds: dict[str, float] = {}
+    duration_target_sec: float | None = None
+    duration_actual_sec: float | None = None
+    subtitle_backend: str = ""
+
+
 class RunManifest(BaseModel):
     """The full record of a run — exactly what ``run.json`` serialises to."""
 
@@ -99,6 +130,8 @@ class RunManifest(BaseModel):
     script_path: str | None = None
     sources_path: str | None = None
     qc_path: str | None = None
+    settings: RunSettings = RunSettings()  # the operator's choices — re-run/resume read this back
+    stats: RunStats = RunStats()  # measured facts, filled in as the run progresses
 
 
 class RunRecorder:
@@ -263,6 +296,11 @@ class RunRecorder:
         """Record (in the manifest + log) what a resumed run reused vs. will regenerate."""
         self._replace(resume_note=note, updated_at=_now())
         self.log(note)
+
+    def set_settings(self, settings: RunSettings) -> None:
+        """Record the operator's choices for this run, so a later re-run/resume (or a dashboard
+        client that reads the manifest mid-run) can recover them instead of assuming defaults."""
+        self._replace(settings=settings, updated_at=_now())
 
     # ── run terminal events ───────────────────────────────────────────────────
     def pending_approval(self) -> None:

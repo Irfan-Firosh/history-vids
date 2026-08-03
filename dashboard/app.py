@@ -22,7 +22,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 from pydantic import BaseModel
 
-from studio import new_run_id
+from studio import RunRecorder, new_run_id
+from studio.run_log import RunSettings
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RUNS_DIR = REPO_ROOT / "result/axen/poc/runs"
@@ -74,9 +75,10 @@ class ReassembleRequest(BaseModel):
 
 
 class ResumeRequest(BaseModel):
-    """Resume payload — reuse frames on disk; subtitles can be toggled on the resume."""
+    """Resume payload — reuse frames on disk; subtitles default to the original run's recorded
+    settings but can be overridden on the resume."""
 
-    captions: bool = True
+    captions: bool | None = None
 
 
 class ApproveRequest(BaseModel):
@@ -294,14 +296,33 @@ def _spawn_run(req: RunRequest) -> str:
         # Per-role model selection (new run page) takes precedence over the legacy single --images.
         if req.char_model or req.concept_model:
             base = req.images
+            provider_label = f"{req.char_model or base}/{req.concept_model or base}"
             cmd += [
                 "--char-model", req.char_model or base,
                 "--concept-model", req.concept_model or base,
             ]
         else:
+            provider_label = req.images
             cmd += ["--images", req.images]
         if not req.captions:
             cmd.append("--no-captions")
+
+        # Persist the operator's choices onto the manifest before the pipeline subprocess starts,
+        # so a later re-run/resume of THIS run can recover them (rerun_run / resume_run below read
+        # `settings` back) instead of silently falling back to defaults.
+        settings = RunSettings(
+            captions=req.captions,
+            min_minutes=req.min_minutes if topic else None,
+            max_minutes=req.max_minutes if topic else None,
+            images_provider=provider_label,
+            voice=req.voice,
+        )
+        rec = RunRecorder.create(
+            RUNS_DIR, title=topic or "(untitled)", images_provider=provider_label,
+            voice_provider=req.voice, scene_count=0, run_id=run_id,
+        )
+        rec.set_settings(settings)
+
         # Logs land in the run's log.txt via the recorder; drop the subprocess' own stdio.
         # start_new_session: detach into its own process group so a dashboard reload/restart/crash
         # does NOT kill an in-flight render (a long topic run outlives the server).
@@ -325,14 +346,20 @@ def rerun_run(run_id: str) -> dict[str, str]:
     regenerates everything from scratch — a new script and new images — unlike Resume (reuse the
     frames on disk) or Re-edit (reuse images, new audio). 409 if a run is already live.
 
-    Duration band + captions aren't persisted on the manifest, so the re-run uses the defaults; the
-    topic and provider mix (the parts that define the run) are reconstructed from the source run.
+    The topic and provider mix (the parts that define the run) are reconstructed from the source
+    run's top-level fields; captions are recovered from its recorded `settings` (defaulting to True
+    for runs recorded before that field existed).
     """
     run_dir = _run_dir(run_id)  # 404 + traversal-guarded
     manifest = _read_manifest(run_dir) or {}
     provider = str(manifest.get("images_provider") or "placeholder")
     voice = "cartesia" if str(manifest.get("voice_provider", "")).startswith("cartesia") else "say"
-    kwargs: dict[str, object] = {"topic": manifest.get("topic") or None, "voice": voice}
+    settings = manifest.get("settings") or {}
+    kwargs: dict[str, object] = {
+        "topic": manifest.get("topic") or None,
+        "voice": voice,
+        "captions": bool(settings.get("captions", True)),
+    }
     if "/" in provider:  # per-role "char/concept" → separate model flags
         char, concept = (provider.split("/") + [provider])[:2]
         kwargs["char_model"] = char if char in _IMAGE_MODELS else "placeholder"
@@ -393,6 +420,10 @@ def resume_run(run_id: str, req: ResumeRequest) -> dict[str, object]:
     manifest = _read_manifest(run_dir) or {}
     provider = str(manifest.get("images_provider") or "gemini")
     voice = "cartesia" if str(manifest.get("voice_provider", "")).startswith("cartesia") else "say"
+    settings = manifest.get("settings") or {}
+    # An explicit choice on the resume request wins; otherwise recover the original run's choice
+    # (defaulting to True for runs recorded before `settings` existed).
+    captions = req.captions if req.captions is not None else bool(settings.get("captions", True))
 
     with _lock:
         proc = _active["proc"]
@@ -413,7 +444,7 @@ def resume_run(run_id: str, req: ResumeRequest) -> dict[str, object]:
             cmd += ["--images", provider]
         # Fallback for refused frames: a different reliable model than the primary character model.
         cmd += ["--fallback", "agnes" if char == "gemini" else "gemini"]
-        if not req.captions:
+        if not captions:
             cmd.append("--no-captions")
         log = (run_dir / "resume.log").open("w", encoding="utf-8")
         proc = subprocess.Popen(
@@ -421,7 +452,7 @@ def resume_run(run_id: str, req: ResumeRequest) -> dict[str, object]:
         )
         log.close()
         _active.update(run_id=run_id, proc=proc, mode="resume")
-    return {"run_id": run_id, "resuming": True, "captions": req.captions}
+    return {"run_id": run_id, "resuming": True, "captions": captions}
 
 
 def _image_provider_flags(provider: str) -> tuple[list[str], str]:
