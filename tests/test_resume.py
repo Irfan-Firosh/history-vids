@@ -23,8 +23,19 @@ class _FakeVoice:
     name = "say"
 
 
-def _fake_render_video(segs, wav, cues, out, overlays=None):
+def _fake_render_segment(image, duration, out_dir, *, width=1920, height=1080, fps=30):
+    """Stand-in for `tools.render.segments.render_segment` — writes a placeholder segment without
+    shelling out to real ffmpeg (the fake frames these tests write aren't valid images)."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    seg = out_dir / f"seg_{image.stem}.mp4"
+    seg.write_bytes(b"seg")
+    return seg, False
+
+
+def _fake_assemble(segments, wav, cues, out, *, work_dir, width=1920, height=1080, fps=30):
+    """Stand-in for `tools.render.assemble.assemble`."""
     out.write_bytes(b"vid")
+    return out
 
 
 def test_resume_reuses_existing_frames_and_generates_only_missing(tmp_path, monkeypatch):
@@ -36,7 +47,8 @@ def test_resume_reuses_existing_frames_and_generates_only_missing(tmp_path, monk
         return out_dir / "n.wav", [(0.0, 9.0), (9.0, 18.0)], [], [], []
 
     monkeypatch.setattr(sp, "build_narration", fake_narration)
-    monkeypatch.setattr(sp, "render_video", _fake_render_video)
+    monkeypatch.setattr(sp, "render_segment", _fake_render_segment)
+    monkeypatch.setattr(sp, "assemble", _fake_assemble)
     monkeypatch.setattr(sp, "ffprobe_duration", lambda p: 18.0)
     monkeypatch.setattr(sp, "load_channel_refs", lambda: [])
 
@@ -67,7 +79,8 @@ def test_no_resume_regenerates_everything(tmp_path, monkeypatch):
         sp, "build_narration",
         lambda scenes, voice, out_dir: (out_dir / "n.wav", [(0.0, 9.0)], [], [], []),
     )
-    monkeypatch.setattr(sp, "render_video", _fake_render_video)
+    monkeypatch.setattr(sp, "render_segment", _fake_render_segment)
+    monkeypatch.setattr(sp, "assemble", _fake_assemble)
     monkeypatch.setattr(sp, "ffprobe_duration", lambda p: 9.0)
     monkeypatch.setattr(sp, "load_channel_refs", lambda: [])
 
@@ -92,7 +105,8 @@ def test_resume_reuses_saved_narration_and_records_progress(tmp_path, monkeypatc
         return out_dir / "narration.wav", [(0.0, 9.0), (9.0, 18.0)]
 
     monkeypatch.setattr(sp, "build_narration", counting_narration)
-    monkeypatch.setattr(sp, "render_video", _fake_render_video)
+    monkeypatch.setattr(sp, "render_segment", _fake_render_segment)
+    monkeypatch.setattr(sp, "assemble", _fake_assemble)
     monkeypatch.setattr(sp, "ffprobe_duration", lambda p: 18.0)
     monkeypatch.setattr(sp, "load_channel_refs", lambda: [])
 

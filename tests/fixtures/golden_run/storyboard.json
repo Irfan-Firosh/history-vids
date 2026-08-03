@@ -1,0 +1,16 @@
+{
+  "title": "Golden Run Fixture",
+  "style": "test-only, not rendered",
+  "scenes": [
+    {
+      "narration": "They ran. The fire spread fast.",
+      "image_prompt": "p",
+      "shot_type": "character"
+    },
+    {
+      "narration": "Nobody came back. Not one.",
+      "image_prompt": "p",
+      "shot_type": "wide"
+    }
+  ]
+}

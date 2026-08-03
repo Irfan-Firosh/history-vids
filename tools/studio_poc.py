@@ -53,8 +53,11 @@ from studio import (  # noqa: E402
     storyboard_from_dict,
     styled_prompt,
 )
-from studio.run_log import RunSettings  # noqa: E402
+from studio.run_log import RunSettings, RunStats  # noqa: E402
 from studio.style import LOCKED_STYLE, PALETTE  # noqa: E402
+from tools.render.assemble import assemble  # noqa: E402
+from tools.render.ffmpeg import subtitle_backend  # noqa: E402
+from tools.render.segments import render_segment  # noqa: E402
 
 W, H, FPS = 1920, 1080, 30
 SAMPLE_RATE = 44100  # Cartesia raw pcm_s16le mono (continuous-narration SSE output)
@@ -767,8 +770,14 @@ def render_video(
     """Assemble the WHOLE video in one pass: `segments` are (image, start, end) global spans, hard-cut
     in order across one continuous narration `wav`, with timed caption `cues` (text, start, end)
     overlaid at the bottom. `overlays` are optional key-fact callouts (text, start, end, base_image)
-    placed on the frame's whitespace via `make_emphasis_png`. Shared by the main render
-    (`render_storyboard`) and the re-edit (`reassemble`)."""
+    placed on the frame's whitespace via `make_emphasis_png`.
+
+    RETIRED from the main render path: `render_storyboard`/`_assemble_video` now use the segment-
+    wise `tools.render.segments.render_segment` + `tools.render.assemble.assemble` instead (one
+    chained `overlay` filter node per caption cue does not scale — measured ~12.8h for an 8-minute
+    video's worth of cues). Kept only because `tools/reassemble.py` still calls it; migrate that
+    caller onto the same new path, then this function and its two PNG-overlay helpers
+    (`make_caption_png`, `make_emphasis_png`) can be deleted for good."""
     overlays = overlays or []
     vf = scene_filter("static", W, H, 1.0, FPS)  # static → scale/crop only; duration irrelevant
     n = len(segments)
@@ -1060,26 +1069,51 @@ def _assemble_video(
     rec, sb, wav, beat_spans, frames_per_beat, callout_overlays, captions,
     words: Sequence[str] = (), word_starts: Sequence[float] = (), word_ends: Sequence[float] = (),
 ):
-    """Step 3, shared by a full render and the approve-time assemble: schedule every frame across the
-    timeline, overlay captions + callouts, mux the continuous narration, and mark the run complete.
+    """Step 3, shared by a full render and the approve-time assemble: render every planned frame to
+    its own content-hash-cached segment (`tools.render.segments.render_segment`), concat them under
+    the continuous narration, and burn timed captions in one libass pass
+    (`tools.render.assemble.assemble`), then mark the run complete.
+
+    Replaces the old single-filtergraph path (`render_video`, still kept around only because
+    `tools/reassemble.py` has not yet been migrated onto this path — see that module) that chained
+    one `overlay` node per caption cue and could not scale past a couple hundred cues.
 
     ``words``/``word_starts``/``word_ends`` are the real Cartesia per-word timings (empty for the
-    ``say`` voice) — passed through so captions word-anchor instead of drifting proportionally."""
-    segments = [
-        (rec.dir / name, s, e) for name, s, e in image_timeline(beat_spans, frames_per_beat)
-    ]
+    ``say`` voice) — passed through so captions word-anchor instead of drifting proportionally.
+
+    ``callout_overlays`` (key-fact badges) are still recorded on the manifest for the dashboard via
+    ``rec.set_callouts`` upstream, but are no longer burned into the video pixels — the new
+    assembler does zero PNG-overlay compositing of any kind, by design (see
+    ``tools/render/assemble.py``'s module docstring)."""
     narrations = [s.narration for s in sb.scenes]
     cues = caption_timeline(
         beat_spans, narrations, words=words, word_starts=word_starts, word_ends=word_ends,
     ) if captions else []
-    # Key-fact callouts (sparse, spacing-capped): each on its beat's first frame's whitespace.
-    overlays = [
-        (text, start, end, rec.dir / f"img_{bi}.png")
-        for text, bi, start, end in callout_overlays
-    ]
+
+    segments: list[Path] = []
+    images_cached = 0
+    for name, start, end in image_timeline(beat_spans, frames_per_beat):
+        seg, was_cached = render_segment(
+            rec.dir / name, end - start, rec.dir / "segments", width=W, height=H, fps=FPS,
+        )
+        images_cached += int(was_cached)
+        segments.append(seg)
+
     out = rec.dir / "video.mp4"
-    rec.log("assembling final video…")
-    render_video(segments, wav, cues, out, overlays=overlays)
+    rec.log(f"assembling final video from {len(segments)} segment(s)…")
+    assemble(
+        segments, wav, cues, out, work_dir=rec.dir / "assemble_work", width=W, height=H, fps=FPS,
+    )
+
+    # RunRecorder has no public stats setter (adding one touches studio/run_log.py, owned by a
+    # sibling agent right now) — write through the same `_replace` path its own public methods use.
+    # `updated_at` is left to the `rec.completed(...)` call immediately below, which always follows.
+    rec._replace(stats=RunStats(
+        shots=len(segments),
+        images_generated=len(segments) - images_cached,
+        images_cached=images_cached,
+        subtitle_backend=subtitle_backend(),
+    ))
     total = ffprobe_duration(out)
     rec.completed(out, total)
     print(f"\n✅ {out}  ({total:.1f}s, {W}x{H})")
@@ -1205,9 +1239,10 @@ def render_storyboard(
 
     One continuous narration (`build_narration`) → real per-beat spans → each beat gets one or more
     **freshly generated** frames, each held ≥ ``MIN_FRAME_HOLD`` seconds (long beats split into that
-    many distinct frames) → the whole thing assembled in a single pass (`render_video`). Images are
-    text-free; a beat's optional `emphasis` fact is drawn as a Schoolbell callout on the frame's
-    whitespace (post overlay, not by the model); there are no cutaway frames.
+    many distinct frames) → each frame rendered to its own cached segment and concatenated under the
+    narration (`_assemble_video`). Images are text-free; a beat's optional `emphasis` fact is
+    recorded on the manifest (`rec.set_callouts`) for the dashboard but is no longer burned into the
+    video itself; there are no cutaway frames.
     Per-role providers: `character` renders character/wide (reference-conditioned), `concept` renders
     concept/map. `resume` skips frames whose image already exists on disk (reuse a partial run);
     `fallback` is a secondary provider used when the primary refuses/fails a frame. Shared by the CLI
