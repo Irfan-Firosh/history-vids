@@ -203,7 +203,8 @@ class LLMScriptProvider:
         return queries, sources
 
     def generate(
-        self, topic: str, num_scenes: int = 52, min_minutes: float = 7.5, max_minutes: float = 8.5
+        self, topic: str, num_scenes: int = 52, min_minutes: float = 7.5,
+        max_minutes: float = 8.5, log=print,
     ):
         # A longer video needs more real facts — scale research depth with the beat count.
         num_queries = min(12, max(6, num_scenes // 6))
@@ -222,7 +223,7 @@ class LLMScriptProvider:
         # the callout pass must not pick a marker as an on-screen phrase, and storyboard.json/qc.md
         # should carry the same clean narration the TTS will speak.
         _strip_inline_citations(data)
-        data = self._repair_if_needed(data, log=print)
+        data = self._repair_if_needed(data, log=log)
         self._apply_callout_analysis(data)  # a focused 2nd pass: pick callouts + flag intense beats
         storyboard = storyboard_from_dict(data)
         return storyboard, sources, data
@@ -380,7 +381,9 @@ def build_and_save(
     provider = LLMScriptProvider(ExaResearchProvider())
     log(f"researching topic {topic!r} · model={provider.model} · "
         f"target {min_minutes:g}-{max_minutes:g} min (~{scenes} beats, ~{budget} words)")
-    storyboard, sources, data = provider.generate(topic, scenes, min_minutes, max_minutes)
+    storyboard, sources, data = provider.generate(
+        topic, scenes, min_minutes, max_minutes, log=log
+    )
 
     # Length check BEFORE any image/TTS spend: words are the only length signal available at this
     # stage, so measure them against the band and say plainly whether the script will land in it.

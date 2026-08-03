@@ -1449,3 +1449,42 @@ def test_generate_does_not_repair_a_passing_draft(monkeypatch):
 
     assert p.repair_ran is False
     assert data["scenes"] == good_scenes
+
+
+def test_generate_threads_the_callers_logger_into_the_repair_pass(monkeypatch):
+    """A real run (20260803-110455) refused a script and its run log showed ZERO mentions of the
+    repair pass: `generate` hardcoded `log=print`, so the message went to buffered stdout that
+    nothing reads. `repair_ran` exists so an operator can see the first-pass hit rate; a repair
+    nobody can observe defeats the point. `build_and_save` already has a `log` (the RunRecorder's
+    in a real run) — `generate` must accept it and pass it down."""
+    from tools.make_script import LLMScriptProvider
+
+    good = '{"title":"T","scenes":[' + ",".join(
+        '{"narration":"Why did they go? You would have gone too. In 1908 a team found 40 '
+        'hearths, each one still ringed with stones you could count.","image_prompt":"x",'
+        '"shot_type":"concept","cite":[]}' for _ in range(16)) + "]}"
+    flat = " ".join(["word"] * 30)
+    bad = '{"title":"T","scenes":[' + ",".join(
+        f'{{"narration":"{flat}.","image_prompt":"x","shot_type":"concept",'
+        '"cite":[]}}' for _ in range(16)) + "]}"
+
+    calls = []
+    monkeypatch.setattr(LLMScriptProvider, "gather_sources", lambda self, *a, **k: ([], []))
+    monkeypatch.setattr(LLMScriptProvider, "_apply_callout_analysis", lambda self, d: None)
+
+    def chat(self, system, user):
+        calls.append(user)
+        return bad if len(calls) == 1 else good
+
+    monkeypatch.setattr(LLMScriptProvider, "_chat", chat)
+
+    p = LLMScriptProvider.__new__(LLMScriptProvider)
+    p.repair_ran = False
+    p.last_prompt = None
+    lines: list[str] = []
+    p.generate("topic", num_scenes=16, log=lines.append)
+
+    assert p.repair_ran is True
+    assert any("repair" in ln.lower() for ln in lines), (
+        f"generate() did not thread the caller's logger into the repair pass; got: {lines}"
+    )
