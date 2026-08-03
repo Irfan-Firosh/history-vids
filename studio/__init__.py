@@ -20,6 +20,7 @@ from studio.narration import (
     emphasis_timeline,
     frames_for_span,
     image_timeline,
+    word_spans_for_texts,
 )
 from studio.research import (
     GroundingReport,
@@ -67,6 +68,7 @@ __all__ = [
     "emphasis_timeline",
     "image_timeline",
     "frames_for_span",
+    "word_spans_for_texts",
     "DEMO_STORYBOARD",
     "storyboard_from_dict",
     "SHOT_TYPES",

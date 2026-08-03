@@ -1,8 +1,10 @@
 """Caption cue splitting + timing (pure) — short readable subtitles instead of a wall of text.
 
-Cartesia gives no word timestamps, so we split a scene's narration into short cues and spread the
-scene's audio duration across them proportionally to length. The renderer shows each cue as a timed
-PNG overlay (this ffmpeg build lacks drawtext/libass), so subtitles change every couple seconds.
+Cartesia DOES return per-word timestamps (``CartesiaTimestampVoice``, ``add_timestamps``), and
+``narration.caption_timeline`` anchors cues to them. This module only decides WHERE to split; the
+proportional ``cue_timings`` below is the fallback for voices with no word data (offline ``say``).
+The renderer shows each cue as a timed PNG overlay (this ffmpeg build lacks drawtext/libass), so
+subtitles change every couple seconds.
 """
 
 from __future__ import annotations
