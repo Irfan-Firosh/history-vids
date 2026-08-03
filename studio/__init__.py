@@ -31,6 +31,7 @@ from studio.research import (
     strip_citation_markers,
 )
 from studio.run_log import RunManifest, RunRecorder, SceneRecord, new_run_id
+from studio.shots import MAX_SHOT_SEC, MIN_SHOT_SEC, WORDS_PER_SHOT, Shot, plan_shots, split_clauses
 from studio.storyboard import DEMO_STORYBOARD, storyboard_from_dict
 from studio.style import CONCEPT_STYLE, LOCKED_STYLE, styled_prompt, thumbnail_prompt
 from studio.types import (
@@ -73,6 +74,12 @@ __all__ = [
     "storyboard_from_dict",
     "SHOT_TYPES",
     "shot_uses_character",
+    "Shot",
+    "plan_shots",
+    "split_clauses",
+    "WORDS_PER_SHOT",
+    "MIN_SHOT_SEC",
+    "MAX_SHOT_SEC",
     "agnes",
     "cloudflare",
     "gemini",
