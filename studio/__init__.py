@@ -22,6 +22,7 @@ from studio.narration import (
     image_timeline,
     word_spans_for_texts,
 )
+from studio.rate_limit import TokenBucket
 from studio.research import (
     GroundingReport,
     ResearchProvider,
@@ -92,4 +93,5 @@ __all__ = [
     "new_run_id",
     "RubricReport",
     "score_script",
+    "TokenBucket",
 ]

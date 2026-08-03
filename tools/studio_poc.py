@@ -23,10 +23,12 @@ import shutil
 import subprocess
 import sys
 import textwrap
+import threading
 import time
 import unicodedata
 import wave
 from collections.abc import Sequence
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import NamedTuple
 
@@ -38,6 +40,7 @@ from dotenv import load_dotenv  # noqa: E402
 from studio import (  # noqa: E402
     DEMO_STORYBOARD,
     RunRecorder,
+    TokenBucket,
     agnes,
     align_beats_to_words,
     build_transcript,
@@ -327,11 +330,6 @@ class AgnesImageProvider:
         self.model = model or os.environ.get("AGNES_IMAGE_MODEL", agnes.DEFAULT_MODEL)
         self.size = size or os.environ.get("AGNES_SIZE", agnes.DEFAULT_SIZE)
         self.max_retries = int(os.environ.get("AGNES_MAX_RETRIES", max_retries))
-        # Floor delay between request STARTS so we never exceed the RPM limit (60/RPM = 3s at RPM 20),
-        # even when retries would otherwise burst. Serial gen is already ~15-30s/call so this rarely bites.
-        default_interval = 60.0 / max(1, self.FREE_RPM)
-        self.min_interval = float(os.environ.get("AGNES_MIN_INTERVAL", str(default_interval)))
-        self._last_call = 0.0
         # Agnes's image-to-image (reference-upload) path is unreliable/slow — it hangs where plain
         # text-to-image succeeds. Default to text-to-image (ignore refs); set AGNES_IMG2IMG=1 to
         # re-enable. This is per-INSTANCE, not per-provider-name: with it off Agnes consumes no
@@ -365,14 +363,14 @@ class AgnesImageProvider:
         blocks the prompt itself (so the caller can soften + retry) and ``RuntimeError`` otherwise."""
         import httpx
 
-        if self.min_interval > 0:  # throttle to stay under the per-minute rate limit
-            gap = self.min_interval - (time.monotonic() - self._last_call)
-            if gap > 0:
-                time.sleep(gap)
-
         last = "no attempt made"
         for attempt in range(self.max_retries):
-            self._last_call = time.monotonic()
+            # Shared across every AgnesImageProvider instance AND every worker thread — the ONLY
+            # thing that can actually hold total throughput under the real 20 rpm quota once
+            # generation is parallelised (a per-instance/per-thread floor would let N workers each
+            # issue their own 20 rpm, blowing straight through the shared limit). Gates every real
+            # HTTP attempt, including retries, since each one counts against the quota.
+            _AGNES_BUCKET.acquire()
             try:
                 resp = httpx.post(agnes.ENDPOINT, headers=headers, json=body, timeout=360)
             except httpx.RequestError as err:  # disconnect / timeout / connect / read — all transient
@@ -435,6 +433,13 @@ class AgnesImageProvider:
             out_path.write_bytes(img)
             return out_path
         raise RuntimeError("unreachable")  # pragma: no cover
+
+
+#: ONE bucket for the whole process, shared by every `AgnesImageProvider` instance (character AND
+#: concept roles are separate instances) and every worker thread the image loop spawns — see
+#: `_request_bytes` above. A per-instance limiter (the old `min_interval`/`_last_call` approach)
+#: cannot cap total throughput once more than one instance or thread calls Agnes concurrently.
+_AGNES_BUCKET = TokenBucket(AgnesImageProvider.FREE_RPM)
 
 
 # ── Voice providers ──────────────────────────────────────────────────────────
@@ -926,15 +931,27 @@ def attach_script_artifacts(rec: RunRecorder, storyboard_path: Path) -> None:
     rec.log(f"attached script artifacts: {', '.join(copied) or 'none'}")
 
 
-def _generate_frame(provider, styled, target, refs, fallback, rec, i, k):
+def _generate_frame(provider, styled, target, refs, fallback, rec, i, k, log_lock=None):
     """Generate one frame; if the primary provider fails (e.g. a Gemini safety refusal on a prompt),
-    fall back to a secondary provider so one bad frame never kills a long run."""
+    fall back to a secondary provider so one bad frame never kills a long run.
+
+    ``log_lock``, when given, serialises the fallback log line. `render_storyboard`'s image loop
+    runs this function inside a shared `ThreadPoolExecutor`, and `RunRecorder.log` (studio/run_log.py)
+    was written for a single caller — it appends to log.txt with no locking of its own. Two workers
+    hitting a fallback in the same instant could otherwise interleave their writes into one
+    corrupted line.
+    """
     try:
         provider.generate(styled, target, refs)
     except Exception as err:
         if fallback is None:
             raise
-        rec.log(f"scene {i} frame {k}: {provider.name} failed ({err}); falling back to {fallback.name}")
+        msg = f"scene {i} frame {k}: {provider.name} failed ({err}); falling back to {fallback.name}"
+        if log_lock is not None:
+            with log_lock:
+                rec.log(msg)
+        else:
+            rec.log(msg)
         fallback.generate(styled, target, refs)
 
 
@@ -1298,35 +1315,64 @@ def render_storyboard(
         # otherwise pay for ~200 off-style Agnes images before anyone notices the art has drifted.
         _style_preflight(rec, sb, images, channel_refs, skip_style_check)
 
-        for i, sc in enumerate(sb.scenes):
-            start, end = beat_spans[i]
-            dur = end - start
-            is_char = shot_uses_character(sc.shot_type)
-            provider = images.character if is_char else images.concept
-            refs = channel_refs if is_char else []
-            rec.scene_started(
-                i, sc.shot_type, sc.image_prompt,
-                ref_count=len(refs), narration=sc.narration, cite=sc.cite,
-                emphasis=kept_callouts.get(i, ""),  # only badge callouts that survive the spacing cap
-                intense=sc.intense,
-                frame_count=frames_per_beat[i],  # >1 → a fire spot; dashboard shows both frames
-            )
-            styled = styled_prompt(
-                sc.image_prompt, sb.style, use_character_ref=bool(refs), shot_type=sc.shot_type
-            )
-            n = frames_per_beat[i]
-            rec.log(f"scene {i}: {sc.shot_type} · {dur:.1f}s · {n} fresh frame(s) ({provider.name})")
-            for k in range(n):  # each frame is its own fresh generation (no reuse/repeat)
-                target = rec.dir / _frame_name(i, k)
-                if resume and target.is_file():  # reuse frames from a partial run
-                    continue
-                # extra frames of the same beat are a clearly different shot (see _frame_prompt) so
-                # the on-screen switch reads as a real cut, not a near-duplicate.
-                _generate_frame(provider, _frame_prompt(styled, k), target, refs, fallback, rec, i, k)
-            rec.scene_image(i, rec.dir / f"img_{i}.png")
-            rec.scene_narration(i, dur)
-            rec.scene_rendered(i, rec.dir / f"img_{i}.png")
-            print(f"  scene {i}: {sc.shot_type:9} {dur:4.1f}s  {n}img  “{sc.narration[:38]}…”")
+        # Frame generation is I/O-bound (one provider HTTP call per frame, paced for Agnes by the
+        # shared `_AGNES_BUCKET`) so a `ThreadPoolExecutor` keeps several requests in flight instead
+        # of paying ~15-30s per frame serially (~200 frames serial ≈ 10-15min; pipelined against the
+        # 20 rpm quota, far less). Phase 1 submits every scene's frame(s) to ONE pool — so a slow
+        # scene doesn't block later scenes from queuing up behind it. Phase 2 walks the scenes IN
+        # ORDER and blocks on that scene's own futures before recording it — this keeps the
+        # manifest/log/print output in the same scene-by-scene order a serial run had, even though
+        # the underlying HTTP calls complete out of order.
+        log_lock = threading.Lock()  # see _generate_frame's docstring: its fallback log line can now
+        # fire from any worker thread, and RunRecorder.log() has no locking of its own.
+        executor = ThreadPoolExecutor(max_workers=6)
+        try:
+            futures: dict[tuple[int, int], Future] = {}
+            for i, sc in enumerate(sb.scenes):
+                start, end = beat_spans[i]
+                dur = end - start
+                is_char = shot_uses_character(sc.shot_type)
+                provider = images.character if is_char else images.concept
+                refs = channel_refs if is_char else []
+                rec.scene_started(
+                    i, sc.shot_type, sc.image_prompt,
+                    ref_count=len(refs), narration=sc.narration, cite=sc.cite,
+                    emphasis=kept_callouts.get(i, ""),  # only badge callouts that survive the spacing cap
+                    intense=sc.intense,
+                    frame_count=frames_per_beat[i],  # >1 → a fire spot; dashboard shows both frames
+                )
+                styled = styled_prompt(
+                    sc.image_prompt, sb.style, use_character_ref=bool(refs), shot_type=sc.shot_type
+                )
+                n = frames_per_beat[i]
+                rec.log(f"scene {i}: {sc.shot_type} · {dur:.1f}s · {n} fresh frame(s) ({provider.name})")
+                for k in range(n):  # each frame is its own fresh generation (no reuse/repeat)
+                    target = rec.dir / _frame_name(i, k)
+                    if resume and target.is_file():  # reuse frames from a partial run
+                        continue
+                    # extra frames of the same beat are a clearly different shot (see _frame_prompt)
+                    # so the on-screen switch reads as a real cut, not a near-duplicate.
+                    futures[(i, k)] = executor.submit(
+                        _generate_frame, provider, _frame_prompt(styled, k), target, refs, fallback,
+                        rec, i, k, log_lock,
+                    )
+
+            for i, sc in enumerate(sb.scenes):
+                start, end = beat_spans[i]
+                dur = end - start
+                n = frames_per_beat[i]
+                for k in range(n):
+                    fut = futures.get((i, k))
+                    if fut is not None:
+                        fut.result()  # propagate a frame's exception here, in scene order
+                rec.scene_image(i, rec.dir / f"img_{i}.png")
+                rec.scene_narration(i, dur)
+                rec.scene_rendered(i, rec.dir / f"img_{i}.png")
+                print(f"  scene {i}: {sc.shot_type:9} {dur:4.1f}s  {n}img  “{sc.narration[:38]}…”")
+        finally:
+            # cancel_futures: on a failure surfaced above, drop any frame not yet STARTED instead of
+            # still paying for it — already-running requests (≤ max_workers of them) finish normally.
+            executor.shutdown(cancel_futures=True)
 
         # 3) Human-in-the-loop gate: with review on, stop here — all images exist, but NOTHING is
         # assembled until the user approves in the dashboard (they can regenerate any image first).
