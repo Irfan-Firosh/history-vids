@@ -312,3 +312,39 @@ could forge a fake source), fence it (`<research_brief>`), and say so in the sys
 **Verify tip:** calibrate a new gate against the real corpus on disk before shipping it. Replaying all
 13 runs showed it refuses exactly the one broken run, flags 3 as thin, and passes 9 — proof it catches
 the failure without blocking good work. A threshold you haven't replayed is a guess.
+
+## 2026-08-03 — Script-craft rubric was calibrated to the wrong pole; the corpus wasn't even on disk
+**Bug (self-caught during Task 2.2 calibration):** `studio/script_rubric.py`'s `MAX_MEAN_SENTENCE_WORDS
+= 17.0` came from the LONG-FORM Mack/Stickly envelope (§13 of `05-script-craft.md` splits this check
+**≤17.0w long-form / ≤15.0w short-form**). This channel targets 6-9 min (`make_script.py`
+`--min-minutes 6.0 --max-minutes 9.0`, matching `context/project/roadmap.md`'s "ONE full ~7-min video
+matching Axen's structure") — i.e. the SHORT-FORM Axen/ThenFolk pole, not Mack's 22-min pole. Every
+measured Axen/ThenFolk winner's mean sentence tops out at 13.9w (Axen 635K); 17.0 was loose enough to
+let bloated short-form prose through undetected.
+**Also found:** no transcript/script corpus was actually on disk in this worktree — `result/axen/
+scripts/` and `result/axen/poc/runs/` are gitignored generated output, present only in the main
+checkout (not shared across git worktrees). Ran `tools/calibrate_rubric.py` against the main checkout's
+real 13 generated scripts via absolute path (read-only, no copy) instead of inventing fixtures.
+**Rule:** when a corpus a plan references isn't on disk in an isolated worktree, check whether it's
+gitignored local output that exists in the main checkout before concluding "no corpus" — read it via
+absolute path rather than copying it in or fabricating substitute data.
+**Calibration outcome (fix: `MAX_MEAN_SENTENCE_WORDS` 17.0 → 15.0; all other constants unchanged
+after replay):**
+- All 5 Axen/ThenFolk winners (3.05M, 1.0M, 635K, 144K, 138K) pass every dimension at the new
+  threshold — the governing rule ("if a threshold rejects a 996K/3.05M-view winner, the threshold is
+  wrong") holds.
+- Both Mack same-cohort underperformers (31K, 24K) and Axen's 11K underperformer still fail, as before.
+- Axen's 9.4K underperformer — the one case a narrow sentence-length-only replay would call a false
+  negative — is independently caught by the (unchanged) `MIN_2P_AFTER_90S_PER_1K=8.0` check: its
+  published post-90s second-person density is 6.4/1k (§13 validation line), below the 8.0 floor. Not a
+  threshold I tuned to catch it — it already failed on a different, pre-existing dimension.
+- Mack's two 22-min winners (1.6M, 316K) now fail the recalibrated mean-sentence check (16.3w, 15.9w >
+  15.0w) — an accepted tradeoff since this pipeline only ever generates short-form scripts.
+- Honest baseline: replaying the pipeline's own 13 real generated scripts (main checkout, gitignored)
+  scores **0/13 pass** — same 0/13 at the old 17.0 threshold, so the recalibration didn't cause the
+  failures. Real defects: 8 of 13 have no question mark anywhere or ask it past 145s (max allowed 45s);
+  most also fall below the numbers/1k and 2p-after-90s floors. The gate is doing real work.
+**Verify tip:** when a fixture in a plan snippet is too short to reach the metric's measurement window
+(here: a toy ~150-word "winner" can never cross the 294-word/90-second mark the retention check needs),
+the test fails for a structural reason unrelated to content quality — extend the fixture to a realistic
+length rather than loosening the check it's supposed to exercise.
