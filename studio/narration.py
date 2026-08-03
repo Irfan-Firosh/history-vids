@@ -179,13 +179,71 @@ def align_beats_to_words(
     return spans
 
 
+def word_spans_for_texts(
+    texts: Sequence[str],
+    words: Sequence[str],
+    word_starts: Sequence[float],
+    word_ends: Sequence[float],
+) -> list[tuple[int, int]]:
+    """Map ordered `texts` onto the spoken-word stream, returning an inclusive (first, last) word
+    index per text.
+
+    Allocation is by cumulative character share, then snapped to a word boundary — the same idea as
+    ``align_beats_to_words`` but at cue granularity. Anchoring in WORD-INDEX space rather than time
+    space is what makes this robust to uneven speaking rate: a cue that takes four seconds to say
+    gets four seconds of subtitle, not its proportional share of the beat.
+
+    Every text gets at least one word, spans are contiguous and monotonic, and the last text always
+    consumes the remaining stream, so cues never gap or overlap.
+    """
+    n_words = len(word_starts)
+    if not texts or n_words == 0:
+        return []
+    lengths = [max(len(" ".join(t.split())), 1) for t in texts]
+    total = sum(lengths)
+    spans: list[tuple[int, int]] = []
+    cursor = 0
+    running = 0
+    for i, length in enumerate(lengths):
+        running += length
+        remaining_texts = len(texts) - i - 1
+        if i == len(texts) - 1:
+            end = n_words - 1
+        else:
+            target = round(running / total * n_words) - 1
+            # Leave at least one word for every text still to come, and never move backwards.
+            end = min(max(target, cursor), n_words - 1 - remaining_texts)
+        spans.append((cursor, end))
+        cursor = end + 1
+    return spans
+
+
 def caption_timeline(
     beat_spans: Sequence[tuple[float, float]],
     narrations: Sequence[str],
     max_words: int = 7,
     max_chars: int = 42,
+    *,
+    words: Sequence[str] = (),
+    word_starts: Sequence[float] = (),
+    word_ends: Sequence[float] = (),
 ) -> list[tuple[str, float, float]]:
-    """Global list of (cue_text, start, end) — short subtitles anchored to real beat spans."""
+    """Global list of (cue_text, start, end).
+
+    With word timings, cues are anchored to the words actually spoken — the cue list concatenated
+    in order IS the transcript, so the whole script maps onto the word stream in one pass. Without
+    them (the offline ``say`` voice) it degrades to spreading each beat's duration across its cues
+    by length, which drifts within a beat but is the best available.
+    """
+    if word_starts and word_ends:
+        all_cues: list[str] = []
+        for text in narrations:
+            all_cues.extend(split_caption_cues(text, max_words=max_words, max_chars=max_chars))
+        spans = word_spans_for_texts(all_cues, words or all_cues, word_starts, word_ends)
+        return [
+            (cue, round(float(word_starts[a]), 3), round(float(word_ends[b]), 3))
+            for cue, (a, b) in zip(all_cues, spans, strict=False)
+        ]
     out: list[tuple[str, float, float]] = []
     for (start, end), text in zip(beat_spans, narrations, strict=False):
         cues = split_caption_cues(text, max_words=max_words, max_chars=max_chars)

@@ -33,7 +33,7 @@ def test_resume_reuses_existing_frames_and_generates_only_missing(tmp_path, monk
 
     # Stub the heavy bits: narration (2 beats, ≥8s each → 1 frame each), assembly, probe.
     def fake_narration(scenes, voice, out_dir):
-        return out_dir / "n.wav", [(0.0, 9.0), (9.0, 18.0)]
+        return out_dir / "n.wav", [(0.0, 9.0), (9.0, 18.0)], [], [], []
 
     monkeypatch.setattr(sp, "build_narration", fake_narration)
     monkeypatch.setattr(sp, "render_video", _fake_render_video)
@@ -63,8 +63,10 @@ def test_resume_reuses_existing_frames_and_generates_only_missing(tmp_path, monk
 
 def test_no_resume_regenerates_everything(tmp_path, monkeypatch):
     char, concept = _FakeProvider("gemini"), _FakeProvider("gemini")
-    monkeypatch.setattr(sp, "build_narration",
-                        lambda scenes, voice, out_dir: (out_dir / "n.wav", [(0.0, 9.0)]))
+    monkeypatch.setattr(
+        sp, "build_narration",
+        lambda scenes, voice, out_dir: (out_dir / "n.wav", [(0.0, 9.0)], [], [], []),
+    )
     monkeypatch.setattr(sp, "render_video", _fake_render_video)
     monkeypatch.setattr(sp, "ffprobe_duration", lambda p: 9.0)
     monkeypatch.setattr(sp, "load_channel_refs", lambda: [])

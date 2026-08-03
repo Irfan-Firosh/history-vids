@@ -24,6 +24,7 @@ from studio.llm import (
     extract_message,
     parse_json_block,
 )
+from studio.narration import caption_timeline, word_spans_for_texts
 from studio.research import (
     MIN_CITATION_COVERAGE,
     MIN_SOURCES,
@@ -687,7 +688,9 @@ def test_render_storyboard_pause_for_review_stops_before_assembly(tmp_path, monk
     # Stub the expensive bits so only the review gate is exercised (no TTS, images, or ffmpeg).
     monkeypatch.setattr(
         studio_poc, "build_narration",
-        lambda scenes, voice, out_dir: (out_dir / "narration.wav", [(0.0, 4.0)] * len(scenes)),
+        lambda scenes, voice, out_dir: (
+            out_dir / "narration.wav", [(0.0, 4.0)] * len(scenes), [], [], [],
+        ),
     )
     monkeypatch.setattr(studio_poc, "_save_beat_spans", lambda *a, **k: None)
     monkeypatch.setattr(studio_poc, "_generate_frame", lambda *a, **k: None)
@@ -1087,6 +1090,43 @@ def test_cue_timings_weights_longer_cues_with_more_time():
 def test_cue_timings_empty_or_zero():
     assert cue_timings([], 5.0) == []
     assert cue_timings(["x"], 0.0) == []
+
+
+def test_word_spans_are_contiguous_monotonic_and_cover_every_word():
+    texts = ["one two", "three four five", "six"]
+    words = ["one", "two", "three", "four", "five", "six"]
+    starts = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0]
+    ends = [0.9, 1.9, 2.9, 3.9, 4.9, 5.9]
+    spans = word_spans_for_texts(texts, words, starts, ends)
+    assert len(spans) == 3
+    assert spans[0][0] == 0 and spans[-1][1] == len(words) - 1
+    for (_, prev_end), (next_start, _) in zip(spans, spans[1:], strict=False):
+        assert next_start == prev_end + 1          # contiguous, no gaps, no overlap
+    assert all(a <= b for a, b in spans)           # never empty
+
+
+def test_caption_timeline_uses_real_word_times_when_available():
+    # One beat, two cues. Speech is deliberately UNEVEN: the first cue takes 4s, the second 1s.
+    # Proportional spreading would split near the middle; word anchoring must land on 4.0.
+    narrations = ["alpha bravo charlie delta."]
+    words = ["alpha", "bravo", "charlie", "delta."]
+    starts = [0.0, 3.0, 4.0, 4.4]
+    ends = [2.9, 3.9, 4.3, 5.0]
+    got = caption_timeline(
+        [(0.0, 5.0)], narrations, word_starts=starts, word_ends=ends, words=words, max_words=2,
+    )
+    assert [c for c, _, _ in got] == ["alpha bravo", "charlie delta."]
+    assert got[0][1] == 0.0
+    assert got[0][2] == 3.9        # real end of "bravo", NOT a proportional guess
+    assert got[1][1] == 4.0        # real start of "charlie"
+
+
+def test_caption_timeline_falls_back_to_proportional_without_word_data():
+    # The offline `say` voice returns no word timings; behaviour must be unchanged there.
+    got = caption_timeline([(0.0, 4.0)], ["alpha bravo charlie delta."], max_words=2)
+    assert [c for c, _, _ in got] == ["alpha bravo", "charlie delta."]
+    assert got[0][1] == 0.0
+    assert got[-1][2] == 4.0       # last cue still ends exactly at the beat end
 
 
 # ── storyboard parsing ─────────────────────────────────────────────────────────

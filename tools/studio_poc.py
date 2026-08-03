@@ -824,12 +824,18 @@ def load_channel_refs() -> list[Path]:
     return [p for p in (REFS_DIR / "character.png", REFS_DIR / "expressions.png") if p.exists()]
 
 
-def build_narration(scenes, voice, out_dir: Path) -> tuple[Path, list[tuple[float, float]]]:
-    """Synthesize the whole script and return ``(continuous_wav, per-beat (start,end) spans)``.
+def build_narration(
+    scenes, voice, out_dir: Path
+) -> tuple[Path, list[tuple[float, float]], list[str], list[float], list[float]]:
+    """Synthesize the whole script and return ``(continuous_wav, per-beat (start,end) spans, words,
+    word_starts, word_ends)``.
 
-    Cartesia → one SSE request with word timestamps → spans snapped to real speech pauses. Any other
-    voice (e.g. macOS ``say``, offline) → synth each beat, concat into one wav, spans = cumulative
-    per-beat durations. Either way the assembler gets a single continuous audio + one span per beat.
+    Cartesia → one SSE request with word timestamps → spans snapped to real speech pauses, plus the
+    per-word text/timings themselves (used downstream to word-anchor captions in
+    ``caption_timeline``). Any other voice (e.g. macOS ``say``, offline) → synth each beat, concat
+    into one wav, spans = cumulative per-beat durations, and no word data (empty lists — captions
+    fall back to proportional spreading). Either way the assembler gets a single continuous audio +
+    one span per beat.
     """
     narrations = [s.narration for s in scenes]
     wav = out_dir / "narration.wav"
@@ -838,7 +844,8 @@ def build_narration(scenes, voice, out_dir: Path) -> tuple[Path, list[tuple[floa
         words, starts, ends = CartesiaTimestampVoice().synthesize(transcript, wav)
         # Anchor each beat to the REAL spoken word where its text ends (accurate; the old
         # character-proportional align_beats drifted up to ~3.5s mid-video).
-        return wav, align_beats_to_words(narrations, words, starts, ends)
+        spans = align_beats_to_words(narrations, words, starts, ends)
+        return wav, spans, words, starts, ends
 
     per_beat: list[Path] = []
     spans: list[tuple[float, float]] = []
@@ -851,10 +858,11 @@ def build_narration(scenes, voice, out_dir: Path) -> tuple[Path, list[tuple[floa
         t += dur
         per_beat.append(w)
     concat_audio(per_beat, wav)
-    return wav, spans
+    return wav, spans, [], [], []
 
 
 BEAT_SPANS_NAME = "beat_spans.json"
+WORD_TIMINGS_NAME = "word_timings.json"
 
 
 def _save_beat_spans(out_dir: Path, spans: list[tuple[float, float]]) -> None:
@@ -873,6 +881,40 @@ def _load_beat_spans(out_dir: Path) -> list[tuple[float, float]] | None:
         return [(float(s), float(e)) for s, e in json.loads(path.read_text())]
     except (ValueError, TypeError):
         return None
+
+
+def _save_word_timings(
+    out_dir: Path, words: Sequence[str], word_starts: Sequence[float], word_ends: Sequence[float]
+) -> None:
+    """Persist Cartesia's per-word text + timings alongside the beat spans, so the approve-time
+    assemble path can word-anchor captions too (see ``studio.narration.caption_timeline``). The
+    ``say`` voice has no word data, so this writes empty lists — treated as "unavailable" on load.
+    """
+    (out_dir / WORD_TIMINGS_NAME).write_text(
+        json.dumps({
+            "words": list(words),
+            "word_starts": [round(float(s), 3) for s in word_starts],
+            "word_ends": [round(float(e), 3) for e in word_ends],
+        })
+    )
+
+
+def _load_word_timings(out_dir: Path) -> tuple[list[str], list[float], list[float]]:
+    """The saved per-word timings for a run, or empty lists if absent/unreadable/never captured
+    (offline ``say`` voice) — ``caption_timeline`` treats empty word data as "fall back to
+    proportional spreading"."""
+    path = out_dir / WORD_TIMINGS_NAME
+    if not path.is_file():
+        return [], [], []
+    try:
+        data = json.loads(path.read_text())
+        return (
+            [str(w) for w in data["words"]],
+            [float(s) for s in data["word_starts"]],
+            [float(e) for e in data["word_ends"]],
+        )
+    except (ValueError, TypeError, KeyError):
+        return [], [], []
 
 
 def wants_refs(provider) -> bool:
@@ -1007,14 +1049,22 @@ def _record_resume_progress(rec: RunRecorder, frames_per_beat: list[int]) -> Non
     print(f"  ↻ {note}")
 
 
-def _assemble_video(rec, sb, wav, beat_spans, frames_per_beat, callout_overlays, captions):
+def _assemble_video(
+    rec, sb, wav, beat_spans, frames_per_beat, callout_overlays, captions,
+    words: Sequence[str] = (), word_starts: Sequence[float] = (), word_ends: Sequence[float] = (),
+):
     """Step 3, shared by a full render and the approve-time assemble: schedule every frame across the
-    timeline, overlay captions + callouts, mux the continuous narration, and mark the run complete."""
+    timeline, overlay captions + callouts, mux the continuous narration, and mark the run complete.
+
+    ``words``/``word_starts``/``word_ends`` are the real Cartesia per-word timings (empty for the
+    ``say`` voice) — passed through so captions word-anchor instead of drifting proportionally."""
     segments = [
         (rec.dir / name, s, e) for name, s, e in image_timeline(beat_spans, frames_per_beat)
     ]
     narrations = [s.narration for s in sb.scenes]
-    cues = caption_timeline(beat_spans, narrations) if captions else []
+    cues = caption_timeline(
+        beat_spans, narrations, words=words, word_starts=word_starts, word_ends=word_ends,
+    ) if captions else []
     # Key-fact callouts (sparse, spacing-capped): each on its beat's first frame's whitespace.
     overlays = [
         (text, start, end, rec.dir / f"img_{bi}.png")
@@ -1038,6 +1088,7 @@ def assemble_storyboard(rec: RunRecorder, sb, captions: bool = True) -> Path:
     beat_spans = _load_beat_spans(rec.dir)
     if not wav.is_file() or beat_spans is None or len(beat_spans) != len(sb.scenes):
         raise RuntimeError("cannot assemble: missing narration.wav / beat_spans.json for this run")
+    words, word_starts, word_ends = _load_word_timings(rec.dir)
     try:
         frames_per_beat = [
             frames_for_span(e - s, intense=sb.scenes[i].intense)
@@ -1048,7 +1099,10 @@ def assemble_storyboard(rec: RunRecorder, sb, captions: bool = True) -> Path:
         )
         rec.set_callouts([(t, bi, st) for t, bi, st, _e in callout_overlays])
         rec.log("approved — assembling from reviewed images…")
-        return _assemble_video(rec, sb, wav, beat_spans, frames_per_beat, callout_overlays, captions)
+        return _assemble_video(
+            rec, sb, wav, beat_spans, frames_per_beat, callout_overlays, captions,
+            words=words, word_starts=word_starts, word_ends=word_ends,
+        )
     except Exception as exc:
         rec.failed(exc)
         print(f"\n❌ assemble failed: {exc}", file=sys.stderr)
@@ -1177,12 +1231,16 @@ def render_storyboard(
         saved_spans = _load_beat_spans(rec.dir) if resume else None
         if resume and wav.is_file() and saved_spans is not None and len(saved_spans) == len(sb.scenes):
             beat_spans = saved_spans
+            words, word_starts, word_ends = _load_word_timings(rec.dir)
             rec.log(f"resume: reusing existing narration.wav + spans "
                     f"({len(beat_spans)} beats, no TTS)")
         else:
             rec.log(f"synthesising continuous narration ({voice.name})…")
-            wav, beat_spans = build_narration(sb.scenes, voice, rec.dir)
+            wav, beat_spans, words, word_starts, word_ends = build_narration(
+                sb.scenes, voice, rec.dir
+            )
             _save_beat_spans(rec.dir, beat_spans)
+            _save_word_timings(rec.dir, words, word_starts, word_ends)
         total_audio = beat_spans[-1][1] if beat_spans else 0.0
         rec.log(f"narration {total_audio:.1f}s · {len(beat_spans)} beats")
 
@@ -1243,7 +1301,8 @@ def render_storyboard(
             return None
         # Otherwise assemble the whole video under the continuous audio right away.
         return _assemble_video(
-            rec, sb, wav, beat_spans, frames_per_beat, callout_overlays, captions
+            rec, sb, wav, beat_spans, frames_per_beat, callout_overlays, captions,
+            words=words, word_starts=word_starts, word_ends=word_ends,
         )
     except Exception as exc:  # record the failure into the manifest, then re-raise for the exit code
         rec.failed(exc)
