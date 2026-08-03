@@ -24,6 +24,9 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "integration: exercises real ffmpeg/ffprobe subprocesses (no network, no API calls)",
+]
 
 [tool.ruff]
 line-length = 100
