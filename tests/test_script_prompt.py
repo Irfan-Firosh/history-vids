@@ -61,3 +61,20 @@ def test_repair_prompt_states_the_passing_metrics_as_invariants():
     assert "mean sentence 10.10w (max 15.0)" in out
     lowered = out.lower()
     assert "already pass" in lowered or "must not" in lowered or "do not regress" in lowered
+
+
+def test_second_person_and_numbers_are_stated_numerically_like_the_rhythm_rule():
+    """Across runs 20260803-110455 / -111724 / -112216, every rubric dimension the prompt states
+    as a NUMBER passed all three times (length, hook, mean sentence, short %, long %). The two
+    it left qualitative — "immersive second person", "every beat that CAN carry a number" — were
+    the only ones that ever failed. Five for five versus zero for two.
+
+    They also need an UPPER bound: the repair pass drove second person to 47.4 then 63.1 per 1k
+    against an 8.0 minimum, and crowded the concrete facts out of the script doing it.
+    """
+    p = SCRIPT_SYSTEM_PROMPT
+    assert "per 1,000 words" in p or "per 1000 words" in p
+    lowered = p.lower()
+    assert "second person" in lowered
+    # bounded on BOTH sides, so "more" is not read as "always better"
+    assert "do not exceed" in lowered or "no more than" in lowered
