@@ -53,6 +53,7 @@ from studio import (  # noqa: E402
     storyboard_from_dict,
     styled_prompt,
 )
+from studio.run_log import RunSettings  # noqa: E402
 from studio.style import LOCKED_STYLE, PALETTE  # noqa: E402
 
 W, H, FPS = 1920, 1080, 30
@@ -1384,6 +1385,12 @@ def main() -> None:
         scene_count=len(sb.scenes),
         run_id=args.run_id,
     )
+    # Record the operator's actual CLI choices onto the manifest (mirrors dashboard/app.py's
+    # `_spawn_run`, which pre-writes the same settings before this subprocess starts — without this
+    # call, this RunRecorder.create() above would silently reset them back to defaults).
+    rec.set_settings(RunSettings(
+        captions=not args.no_captions, images_provider=images_label, voice=voice.name,
+    ))
     print(f"Storyboard: {sb.title!r} · {len(sb.scenes)} scenes · images={images_label} · voice={voice.name}")
     print(f"Run: {rec.run_id}  →  {rec.dir}")
     if args.storyboard:

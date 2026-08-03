@@ -21,6 +21,7 @@ sys.path.insert(0, str(_ROOT))
 from dotenv import load_dotenv  # noqa: E402
 
 from studio import RunRecorder, new_run_id, storyboard_from_dict  # noqa: E402
+from studio.run_log import RunSettings  # noqa: E402
 from tools.make_script import build_and_save  # noqa: E402
 from tools.studio_poc import (  # noqa: E402
     IMAGE_PROVIDER_NAMES,
@@ -70,6 +71,13 @@ def main() -> None:
         scene_count=0,
         run_id=args.run_id or new_run_id(),
     )
+    # Record the operator's actual CLI choices onto the manifest (mirrors dashboard/app.py's
+    # `_spawn_run`, which pre-writes the same settings before this subprocess starts — without this
+    # call, this RunRecorder.create() above would silently reset them back to defaults).
+    rec.set_settings(RunSettings(
+        captions=not args.no_captions, min_minutes=args.min_minutes, max_minutes=args.max_minutes,
+        images_provider=images_label, voice=voice.name,
+    ))
     rec.attach_artifacts(topic=args.topic)
     print(f"Run: {rec.run_id} → researching {args.topic!r}")
 
