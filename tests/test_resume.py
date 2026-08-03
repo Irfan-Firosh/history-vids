@@ -62,7 +62,10 @@ def test_resume_reuses_existing_frames_and_generates_only_missing(tmp_path, monk
     )
     (rec.dir / "img_0.png").write_bytes(b"ALREADY-DONE")  # a frame from the interrupted run
 
-    sp.render_storyboard(rec, sb, providers, _FakeVoice(), captions=False, resume=True)
+    # skip_style_check: this test's frames are fake non-image bytes (not a real style gate test).
+    sp.render_storyboard(
+        rec, sb, providers, _FakeVoice(), captions=False, resume=True, skip_style_check=True,
+    )
 
     # img_0 existed → skipped + byte-preserved; img_1 was missing → generated.
     assert "img_0.png" not in char.calls
@@ -92,7 +95,11 @@ def test_no_resume_regenerates_everything(tmp_path, monkeypatch):
         voice_provider="say", scene_count=1, run_id="r",
     )
     (rec.dir / "img_0.png").write_bytes(b"OLD")
-    sp.render_storyboard(rec, sb, sp.ImageProviders(char, concept), _FakeVoice(), captions=False)
+    # skip_style_check: "OLD" is fake non-image bytes (not a real style gate test).
+    sp.render_storyboard(
+        rec, sb, sp.ImageProviders(char, concept), _FakeVoice(), captions=False,
+        skip_style_check=True,
+    )
     assert "img_0.png" in char.calls  # without resume, it regenerates
 
 
@@ -124,8 +131,9 @@ def test_resume_reuses_saved_narration_and_records_progress(tmp_path, monkeypatc
     sp._save_beat_spans(rec.dir, [(0.0, 9.0), (9.0, 18.0)])
     (rec.dir / "img_0.png").write_bytes(b"DONE")
 
+    # skip_style_check: "DONE" is fake non-image bytes (not a real style gate test).
     sp.render_storyboard(rec, sb, sp.ImageProviders(char, concept), _FakeVoice(),
-                         captions=False, resume=True)
+                         captions=False, resume=True, skip_style_check=True)
 
     assert calls["narration"] == 0  # reused saved narration.wav + spans, no re-synth
     assert "img_1.png" in concept.calls  # only the missing frame generated

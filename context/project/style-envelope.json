@@ -2,11 +2,34 @@
   "_provenance": {
     "source": "context/research/2026-08-01/04-video-forensics.md",
     "measured": "2026-08-01",
+    "recalibrated": "2026-08-03",
     "channels": ["AxenCool", "Mack", "Stickly", "HistoryAlive", "ThenFolk"],
     "style_frames": 2703,
-    "note": "Numbers only. Competitor media is never committed."
+    "note": "Numbers only. Competitor media is never committed.",
+    "recalibration_reason": "The 2026-08-01 envelope was the raw min/max of PER-CHANNEL MEANS (§4 table), which put Axen's own mean saturation (0.270, MEASURED) exactly at the envelope max (0.27) and Axen's own mean colour_bins (16.2, MEASURED) at the max (16) -- rejecting roughly half of Axen's own frames by construction, since a mean sits at the boundary of a distribution built from it. No per-frame reference data survives on disk to compute a true p10/p90 (raw frames were analysed in a scratch dir outside the repo, per policy, and never committed) -- so this recalibration widens the per-channel MEANS (MEASURED, from §4's table) into a distributional estimate rather than inventing per-frame percentiles.",
+    "method": "For each metric: anchor_low = min(Axen_mean, Mack_mean); anchor_high = max(Axen_mean, Mack_mean); envelope = [anchor_low * (1 - 0.20), anchor_high * (1 + 0.20)], rounded outward. Scope is Axen+Mack only (the two channels §4 prose calls 'the two channels with real traction', sitting in the 'low-saturation, high-near-white, low-colour-count corner' that LOCKED_STYLE targets) -- Stickly/HistoryAlive/ThenFolk are deliberately excluded as anchors: their look (painterly texture, dense colour, heavy text) is not what studio/style.py's LOCKED_STYLE draws. The +/-20% margin is an ESTIMATE standing in for real per-frame variance around each channel's own mean, chosen so neither reference channel's mean sits at the raw edge; it is not tuned per-metric and was replayed against all 5 channels' published means (see tests/test_style_check.py) to confirm it still refuses Stickly/HistoryAlive/ThenFolk (each fails >=1 metric) while admitting Axen's and Mack's own means comfortably inside every bound.",
+    "conflict_noted": "§4 prose states Axen+Mack occupy 29-33% near-white while §9 item 17 widens to 29-45% by folding in Stickly (44.5%), which the same document (line 274-276) explicitly excludes from 'the two channels with real traction'. This recalibration resolves that conflict by preferring the raw per-channel MEANS table (§4) over the downstream 'reproducible spec' bullets (§9), per this project's evidence standard (prefer the source holding the raw data).",
+    "bounds": {
+      "saturation": {
+        "low": "ESTIMATE: Mack_mean(0.161, MEASURED) * 0.80, rounded down to 0.12",
+        "high": "ESTIMATE: Axen_mean(0.270, MEASURED) * 1.20, rounded up to 0.33"
+      },
+      "colour_bins": {
+        "low": "ESTIMATE: Mack_mean(15.5, MEASURED) * 0.80, rounded down to 12",
+        "high": "ESTIMATE: Axen_mean(16.2, MEASURED) * 1.20, rounded up to 20"
+      },
+      "near_white_pct": {
+        "low": "ESTIMATE: Axen_mean(29.3, MEASURED) * 0.80, rounded down to 23.4",
+        "high": "ESTIMATE: Mack_mean(33.2, MEASURED) * 1.20, rounded up to 39.9"
+      }
+    },
+    "previous_2026-08-01": {
+      "saturation": [0.16, 0.27],
+      "colour_bins": [13, 16],
+      "near_white_pct": [29.0, 45.0]
+    }
   },
-  "saturation": [0.16, 0.27],
-  "colour_bins": [13, 16],
-  "near_white_pct": [29.0, 45.0]
+  "saturation": [0.12, 0.33],
+  "colour_bins": [12, 20],
+  "near_white_pct": [23.4, 39.9]
 }

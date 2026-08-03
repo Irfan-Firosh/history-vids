@@ -707,7 +707,12 @@ def test_render_storyboard_pause_for_review_stops_before_assembly(tmp_path, monk
         scene_count=len(sb.scenes),
     )
     images = studio_poc.providers_from_roles("placeholder", "placeholder")
-    out = studio_poc.render_storyboard(rec, sb, images, _Voice(), pause_for_review=True)
+    # skip_style_check: the placeholder provider draws a text title-card, not real style-locked
+    # art, so it is not expected to pass the style gate (task 5.2) — this test is about the
+    # review-gate bookkeeping, not style enforcement.
+    out = studio_poc.render_storyboard(
+        rec, sb, images, _Voice(), pause_for_review=True, skip_style_check=True,
+    )
     assert out is None  # nothing assembled
     assert assembled["called"] is False  # the assembler was never reached
     assert rec.manifest.status == "pending_approval"

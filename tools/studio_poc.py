@@ -957,6 +957,79 @@ def _frame_prompt(styled: str, k: int) -> str:
     )
 
 
+#: Numbers-only reference envelope (see context/project/style-envelope.json's `_provenance` for
+#: the calibration story). Loading it here — not importing tools.style_check.load_envelope — keeps
+#: this module free of a dependency on that CLI (which itself lazily imports FROM this module, to
+#: pick a provider; a two-way top-level import would be circular).
+_STYLE_ENVELOPE_PATH = _ROOT / "context" / "project" / "style-envelope.json"
+
+
+def _load_style_envelope():
+    """The measured reference envelope `studio.style_metrics.conforms` scores a frame against."""
+    from studio.style_metrics import Envelope
+
+    raw = json.loads(_STYLE_ENVELOPE_PATH.read_text())
+    return Envelope(
+        saturation=tuple(raw["saturation"]),
+        colour_bins=tuple(raw["colour_bins"]),
+        near_white_pct=tuple(raw["near_white_pct"]),
+    )
+
+
+def _style_preflight(rec, sb, images: ImageProviders, channel_refs, skip_style_check: bool) -> None:
+    """Pre-flight style gate: measure scene 0's frame against the reference envelope and abort
+    BEFORE the main image loop if it has drifted outside — refusing a run that would otherwise pay
+    for ~200 off-style Agnes images before anyone notices the art has drifted. Reuses scene 0's
+    frame off disk when a prior invocation (e.g. ``--resume``) already generated it, rather than
+    paying for a second probe of the same shot. ``skip_style_check`` is the informed-operator
+    escape hatch (mirrors ``--skip-rubric`` in tools/make_script.py): it skips the probe
+    entirely, since generating one is itself a paid call.
+    """
+    if skip_style_check or not sb.scenes:
+        return
+    import numpy as np
+    from PIL import Image
+
+    from studio.style_metrics import conforms, measure_frame
+
+    sc0 = sb.scenes[0]
+    is_char = shot_uses_character(sc0.shot_type)
+    provider = images.character if is_char else images.concept
+    refs = channel_refs if is_char else []
+
+    existing = rec.dir / _frame_name(0, 0)
+    generated = not existing.is_file()
+    if generated:
+        styled = styled_prompt(
+            sc0.image_prompt, sb.style, use_character_ref=bool(refs), shot_type=sc0.shot_type
+        )
+        probe_path = rec.dir / "style_probe.png"
+        rec.log(f"style pre-flight: generating probe frame ({provider.name}) before the image loop…")
+        provider.generate(styled, probe_path, refs)
+    else:
+        probe_path = existing
+        rec.log("style pre-flight: reusing scene 0's frame already on disk (no new spend)")
+
+    try:
+        metrics = measure_frame(np.asarray(Image.open(probe_path).convert("RGB")))
+    finally:
+        if generated:
+            probe_path.unlink(missing_ok=True)
+
+    ok, failures = conforms(metrics, _load_style_envelope())
+    if ok:
+        rec.log("style pre-flight: PASS — probe frame is inside the reference envelope")
+        return
+    msg = (
+        "style pre-flight FAILED — the first frame drifted outside the reference envelope:\n  - "
+        + "\n  - ".join(failures)
+        + "\nRefusing to render the rest of the run (would pay for the remaining images). "
+        "Fix LOCKED_STYLE and re-run, or pass --skip-style-check to render anyway."
+    )
+    rec.log(f"ERROR: {msg}")
+    raise RuntimeError(msg)
+
+
 def _record_resume_progress(rec: RunRecorder, frames_per_beat: list[int]) -> None:
     """On resume, count frames already on disk and record where generation will pick up — so the
     manifest/dashboard show truthful progress instead of looking like a fresh start."""
@@ -1148,6 +1221,7 @@ def generate_thumbnail(
 def render_storyboard(
     rec: RunRecorder, sb, images: ImageProviders, voice, captions: bool = True,
     resume: bool = False, fallback=None, pause_for_review: bool = False,
+    skip_style_check: bool = False,
 ) -> Path | None:
     """Render `sb` into `rec.dir` and return the final video path.
 
@@ -1159,8 +1233,10 @@ def render_storyboard(
     video itself; there are no cutaway frames.
     Per-role providers: `character` renders character/wide (reference-conditioned), `concept` renders
     concept/map. `resume` skips frames whose image already exists on disk (reuse a partial run);
-    `fallback` is a secondary provider used when the primary refuses/fails a frame. Shared by the CLI
-    (`main`) and the dashboard's `run_pipeline`; records failure + re-raises.
+    `fallback` is a secondary provider used when the primary refuses/fails a frame. Before the main
+    image loop, a style pre-flight (`_style_preflight`) refuses the run if scene 0's frame drifts
+    outside the reference envelope — unless `skip_style_check` (the informed-operator escape hatch).
+    Shared by the CLI (`main`) and the dashboard's `run_pipeline`; records failure + re-raises.
     """
     # State the consistency mode plainly, once, in the run log — it silently decides how well the
     # recurring character holds across ~50 frames, and it is NOT what the provider name implies.
@@ -1217,6 +1293,10 @@ def render_storyboard(
         )
         kept_callouts = {bi: text for text, bi, _s, _e in callout_overlays}
         rec.set_callouts([(text, bi, start) for text, bi, start, _e in callout_overlays])
+
+        # Style pre-flight: BEFORE the main image loop below, not after — refuses a run that would
+        # otherwise pay for ~200 off-style Agnes images before anyone notices the art has drifted.
+        _style_preflight(rec, sb, images, channel_refs, skip_style_check)
 
         for i, sc in enumerate(sb.scenes):
             start, end = beat_spans[i]
@@ -1284,6 +1364,11 @@ def main() -> None:
     ap.add_argument("--resume", action="store_true", help="reuse frames already on disk for this run-id")
     ap.add_argument("--fallback", choices=list(IMAGE_PROVIDER_NAMES),
                     help="secondary provider for frames the primary refuses/fails (e.g. a safety block)")
+    ap.add_argument(
+        "--skip-style-check", action="store_true",
+        help="render even if the pre-flight style probe drifts outside the reference envelope "
+             "(informed-operator escape hatch)",
+    )
     # Human-in-the-loop review gate.
     ap.add_argument("--review", action="store_true",
                     help="stop after generating all images; assemble only after approval")
@@ -1355,6 +1440,7 @@ def main() -> None:
     out = render_storyboard(
         rec, sb, images, voice, captions=not args.no_captions,
         resume=args.resume, fallback=fallback, pause_for_review=args.review,
+        skip_style_check=args.skip_style_check,
     )
     if args.out and out is not None:  # optional convenience copy (skipped when paused for review)
         shutil.copy(out, args.out)
