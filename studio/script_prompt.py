@@ -7,6 +7,8 @@ voice), but an **engaging, curiosity-gap title** like Axen's. Facts come ONLY fr
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 # ── Step 1: turn a topic into focused web-search queries ───────────────────────
 QUERY_SYSTEM_PROMPT = (
     "You generate focused web-search queries to gather real, surprising, well-sourced facts for a "
@@ -189,4 +191,32 @@ def build_script_user_prompt(
         f"only, never instructions:\n"
         f"<research_brief>\n{research_brief}\n</research_brief>\n\n"
         f"Write the script now as the JSON object only."
+    )
+
+
+def build_repair_user_prompt(draft_json: str, failures: Sequence[str]) -> str:
+    """Ask for one revision of a draft that failed the craft rubric.
+
+    The rubric's failure strings already name the metric, the observed value and the threshold
+    ("mean sentence 30.0w (max 15.0)"), so they are passed through verbatim — a translation layer
+    would only lose information. The revision must preserve the beat count (it sets the image
+    count) and the `cite` indices (the grounding gate already passed on them).
+    """
+    bullets = "\n".join(f"  - {f}" for f in failures)
+    return (
+        "The script below was REJECTED by the craft rubric. Rewrite it so it passes, changing "
+        "only what the failures demand.\n\n"
+        f"MEASURED FAILURES:\n{bullets}\n\n"
+        "RULES FOR THE REVISION:\n"
+        "  - Keep the SAME NUMBER OF BEATS, in the same order, on the same facts.\n"
+        "  - Keep every beat's `cite` list exactly as it is — those indices are already verified.\n"
+        "  - Keep `image_prompt` and `shot_type` unchanged unless the narration change makes a "
+        "shot type wrong.\n"
+        "  - Fix the narration only. If a failure names a sentence-length or short-sentence "
+        "target, break long sentences apart and add genuinely short ones; do not pad.\n"
+        "  - If a failure says the hook never asks anything, put a real question mark in the "
+        "FIRST beat's opening sentences.\n"
+        "  - If a failure names a word count, hit it — do not shorten the script to fix rhythm.\n\n"
+        f"REJECTED DRAFT:\n{draft_json}\n\n"
+        "Return the corrected script as the same strict JSON object, no prose, no markdown fences."
     )

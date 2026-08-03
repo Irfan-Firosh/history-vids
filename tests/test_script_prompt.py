@@ -1,4 +1,4 @@
-from studio.script_prompt import SCRIPT_SYSTEM_PROMPT
+from studio.script_prompt import SCRIPT_SYSTEM_PROMPT, build_repair_user_prompt
 
 
 def test_hook_rule_demands_an_actual_question_mark():
@@ -28,3 +28,21 @@ def test_stale_held_shot_model_is_gone_and_clauses_are_explained():
 def test_specificity_rule_targets_abstract_topics():
     # numbers_per_1k measured 0.0 on abstract topics whose briefs carried 1000-1942 digits.
     assert "abstract" in SCRIPT_SYSTEM_PROMPT.lower()
+
+
+def test_repair_prompt_embeds_the_draft_and_every_failure_verbatim():
+    draft = '{"title": "T", "scenes": [{"narration": "A long flat line.", "cite": []}]}'
+    failures = ("no question mark anywhere — the hook never asks anything",
+                "mean sentence 30.0w (max 15.0)")
+    out = build_repair_user_prompt(draft, failures)
+    assert draft in out
+    for f in failures:
+        assert f in out, f"failure not passed through: {f}"
+
+
+def test_repair_prompt_protects_beat_count_and_citations():
+    # A repair that drops beats changes the image count, and one that drops cite indices breaks
+    # the grounding gate that already passed. Both must survive the revision.
+    out = build_repair_user_prompt("{}", ["mean sentence 30.0w (max 15.0)"])
+    assert "same number of beats" in out.lower()
+    assert "cite" in out
