@@ -43,6 +43,8 @@ result/axen/poc/
 result/axen/scripts/
 result/axen/thumbs/
 assets/generated/
+# tools/style_check.py output: generated probe frames + contact sheets — never commit generated art
+result/style_check/
 
 # OS / editor
 .DS_Store
