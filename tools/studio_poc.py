@@ -1062,9 +1062,10 @@ def _style_preflight(rec, sb, images: ImageProviders, channel_refs, skip_style_c
         f"the reference envelope:\n  - "
         + "\n  - ".join(failures)
         + "\nRefusing to render the rest of the run (would pay for the remaining images). "
-        f"The research, script and narration for this run are already on disk and are NOT lost: "
-        f"resume with --run-id {rec.run_id} once the style is fixed, and they will be reused. "
-        "Fix LOCKED_STYLE and resume, or pass --skip-style-check to render anyway."
+        f"This run's script and narration are on disk at {rec.dir}, but --run-id reuses the "
+        f"DIRECTORY, not the work: re-running re-pays for research, script and TTS. To render "
+        f"what is already there, re-run with --skip-style-check. Otherwise fix LOCKED_STYLE "
+        f"first — a re-run without that will fail this gate again."
     )
     rec.log(f"ERROR: {msg}")
     raise RuntimeError(msg)
