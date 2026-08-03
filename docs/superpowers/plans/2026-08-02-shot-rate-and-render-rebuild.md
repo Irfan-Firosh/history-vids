@@ -14,6 +14,10 @@
 - **Lint:** `uv run ruff check .` must pass. Rules `E,F,I,UP,B`; **line-length 100**.
 - **Tests:** `uv run pytest -q` must pass. Baseline at plan start is **196 passing**; that number only goes up.
 - **Pure vs side-effecting:** anything in `studio/` has **no I/O** — no file reads, no network, no `subprocess`. I/O lives in `tools/`. This is the existing convention and every new pure module must honour it.
+  - **Known pre-existing exception:** `studio/run_log.py` (`RunRecorder`) writes the manifest and
+    log to disk — `read_text`/`open`/`write_text`. It predates this plan and is the one module in
+    `studio/` that violates the rule. Do **not** "fix" it as a drive-by; it is out of scope for
+    every task here. Every *other* module in `studio/`, new or modified, must stay pure.
 - **Immutability:** new value objects are `pydantic.BaseModel` with `model_config = ConfigDict(frozen=True)`, matching `studio/types.py`.
 - **Type annotations on every function signature.** `from __future__ import annotations` at the top of every module.
 - **Never print or commit `.env` values.** Reference variable *names* only.
@@ -195,15 +199,21 @@ The insight that makes this simple: cues concatenated in order equal the beats c
 - Modify: `studio/narration.py:182-194` (`caption_timeline`)
 - Modify: `studio/captions.py:1-6` (stale docstring)
 - Modify: `studio/__init__.py` (export `word_spans_for_texts`)
-- Test: `tests/test_studio.py`
+- Modify: `tools/studio_poc.py` (`build_narration` must RETURN the word timings, and persist
+  `word_timings.json`, or nothing ever passes word data to `caption_timeline`)
+- Test: `tests/test_studio.py`, `tests/test_resume.py`
 
 **Interfaces:**
 - Consumes: `split_caption_cues(text, max_words, max_chars) -> list[str]` from `studio/captions.py`
 - Produces:
   - `word_spans_for_texts(texts, words, word_starts, word_ends) -> list[tuple[int, int]]` — inclusive first/last word index per text
-  - `caption_timeline(beat_spans, narrations, *, word_starts=(), word_ends=(), max_words=7, max_chars=42) -> list[tuple[str, float, float]]` — unchanged behaviour when word data is absent
+  - `caption_timeline(beat_spans, narrations, max_words=7, max_chars=42, *, words=(), word_starts=(), word_ends=()) -> list[tuple[str, float, float]]` — unchanged behaviour when word data is absent
+  - **`build_narration(scenes, voice, out_dir)` now returns a 5-tuple**
+    `(wav, beat_spans, words, word_starts, word_ends)` — was a 2-tuple `(wav, beat_spans)`.
+    Any task touching `tools/studio_poc.py` or mocking `build_narration` must match the new
+    arity. Persists `word_timings.json` beside `beat_spans.json` so resume stays word-anchored.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_studio.py  (append)
@@ -247,12 +257,12 @@ def test_caption_timeline_falls_back_to_proportional_without_word_data():
     assert got[-1][2] == 4.0       # last cue still ends exactly at the beat end
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `uv run pytest tests/test_studio.py -k "word_spans or caption_timeline" -v`
 Expected: FAIL — `ImportError: cannot import name 'word_spans_for_texts'`
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 ```python
 # studio/narration.py  — replace caption_timeline, add word_spans_for_texts above it
@@ -342,12 +352,12 @@ the proportional ``cue_timings`` below is the fallback for voices with no word d
 
 Add `word_spans_for_texts` to the `studio/narration` import block and `__all__` in `studio/__init__.py`.
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `uv run pytest -q && uv run ruff check .`
 Expected: 199 passed (196 + 3), ruff clean
 
-- [ ] **Step 5: Wire the call site**
+- [x] **Step 5: Wire the call site**
 
 In `tools/studio_poc.py:_assemble_video`, pass the word data through. The beat-span computation
 already has `words`, `word_starts`, `word_ends` in scope where `align_beats_to_words` is called;
@@ -360,7 +370,7 @@ cues = caption_timeline(
 ) if captions else []
 ```
 
-- [ ] **Step 6: Verify and commit**
+- [x] **Step 6: Verify and commit**
 
 ```bash
 git add studio/narration.py studio/captions.py studio/__init__.py tools/studio_poc.py tests/test_studio.py
@@ -385,7 +395,7 @@ git commit -m "fix: anchor caption cues to real spoken word times"
   - `RunStats(shots: int = 0, images_generated: int = 0, images_cached: int = 0, stage_seconds: dict[str, float] = {}, duration_target_sec: float | None = None, duration_actual_sec: float | None = None, subtitle_backend: str = "")`
   - `RunManifest.settings: RunSettings`, `RunManifest.stats: RunStats`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # tests/test_run_log.py  (append)
@@ -418,12 +428,12 @@ def test_settings_round_trip_through_json():
     assert again.stats.subtitle_backend == "libass"
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `uv run pytest tests/test_run_log.py -v`
 Expected: FAIL — `ImportError: cannot import name 'RunSettings'`
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 ```python
 # studio/run_log.py  — add above RunManifest
@@ -466,16 +476,16 @@ Add to `RunManifest`:
     stats: RunStats = RunStats()
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `uv run pytest -q && uv run ruff check .`
 Expected: 201 passed, ruff clean
 
-- [ ] **Step 5: Read settings back in the dashboard**
+- [x] **Step 5: Read settings back in the dashboard**
 
 In `dashboard/app.py`, `_spawn_run` writes `RunSettings` onto the manifest at start. `rerun_run` and `resume_run` read `manifest["settings"]["captions"]` (defaulting to `True` when absent) instead of assuming the default, and delete the now-inaccurate comment at line 328.
 
-- [ ] **Step 6: Verify and commit**
+- [x] **Step 6: Verify and commit**
 
 ```bash
 git add studio/run_log.py dashboard/app.py tests/test_run_log.py tests/test_dashboard.py
@@ -1100,7 +1110,7 @@ git commit -m "feat: clause-aware shot planning at the measured reference rate"
 - Consumes: cue tuples `(text, start, end)` from `caption_timeline`
 - Produces: `build_ass(cues: Sequence[tuple[str, float, float]], *, width: int = 1920, height: int = 1080, font: str = "Arial", font_size: int = 54) -> str`, `ass_timestamp(seconds: float) -> str`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_subtitles.py
@@ -1134,12 +1144,12 @@ def test_header_declares_the_render_resolution():
     assert "PlayResY: 1080" in out
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `uv run pytest tests/test_subtitles.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'studio.subtitles'`
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 ```python
 # studio/subtitles.py
@@ -1221,12 +1231,12 @@ def build_ass(
     return "\n".join(lines) + "\n"
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `uv run pytest tests/test_subtitles.py -v && uv run ruff check .`
 Expected: 4 passed, ruff clean
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 ```bash
 git add studio/subtitles.py tests/test_subtitles.py
@@ -1633,7 +1643,7 @@ git commit -m "refactor: assemble videos segment-wise instead of one filtergraph
 **Interfaces:**
 - Produces: `FrameMetrics` (frozen: `saturation`, `brightness`, `edge_density`, `near_white_pct`, `colour_bins`), `measure_frame(rgb: "np.ndarray") -> FrameMetrics`, `Envelope`, `conforms(metrics, envelope) -> tuple[bool, tuple[str, ...]]`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_style_metrics.py
@@ -1666,12 +1676,12 @@ def test_a_saturated_frame_exceeds_the_reference_envelope():
     assert any("saturation" in f for f in failures)
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `uv run pytest tests/test_style_metrics.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'studio.style_metrics'`
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 ```python
 # studio/style_metrics.py
@@ -1770,12 +1780,12 @@ def conforms(metrics: FrameMetrics, envelope: Envelope) -> tuple[bool, tuple[str
 }
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `uv run pytest tests/test_style_metrics.py -v && uv run ruff check .`
 Expected: 3 passed, ruff clean
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 ```bash
 git add studio/style_metrics.py context/project/style-envelope.json tests/test_style_metrics.py
