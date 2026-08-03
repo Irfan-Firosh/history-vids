@@ -1094,6 +1094,37 @@ def test_generate_records_the_full_rendered_prompt_on_the_provider(monkeypatch):
     assert SCRIPT_SYSTEM_PROMPT in prov.last_prompt  # the system prompt is captured too
 
 
+def test_generate_defaults_to_the_axen_pole_band(monkeypatch):
+    # generate() is reachable directly, not just through build_and_save (which always passes an
+    # explicit band) — so a caller relying on its defaults must still land on the 7.5-8.5 minute /
+    # 1568-word Axen-pole budget, not the old 6-9 minute / 45-beat band this task exists to fix.
+    from tools.make_script import LLMScriptProvider
+
+    class OneSource:
+        name = "fake"
+
+        def search(self, query, num_results=6):
+            return [ResearchSource(title="T", url="http://a", snippet="s")]
+
+    seen: list[str] = []
+
+    def fake_chat(system, user, temp=None):
+        seen.append(user)
+        if system is QUERY_SYSTEM_PROMPT:
+            return '{"queries": ["q1"]}'
+        if system is CALLOUT_ANALYSIS_SYSTEM_PROMPT:
+            return '{"callouts": [], "intense": []}'
+        return '{"title": "T", "scenes": [{"narration": "n", "image_prompt": "p", "cite": [1]}]}'
+
+    prov = LLMScriptProvider(research=OneSource())
+    monkeypatch.setattr(prov, "_chat", fake_chat)
+    prov.generate("topic")  # no band, no scene count — must not fall back to the stale defaults
+    script_prompt = seen[1]
+    assert "7.5-8.5 minute" in script_prompt
+    assert "1568 words" in script_prompt
+    assert "52 beats" in script_prompt
+
+
 def test_build_and_save_persists_script_prompt_and_rubric(monkeypatch, tmp_path):
     # End-to-end: a topic → the script-generation stage must leave a paper trail on disk for both
     # gaps the dashboard needs to close — the exact LLM prompt, and the numeric rubric report.
@@ -1342,3 +1373,13 @@ def test_hf_endpoints_try_router_then_classic():
 
 def test_hf_request_body_is_text_to_image():
     assert huggingface.request_body("hi") == {"inputs": "hi"}
+
+
+def test_word_budget_uses_the_measured_axen_speaking_rate():
+    # 04-video-forensics.md section 7: Axen speaks 195.6 wpm. The old 183.0 under-budgeted every
+    # script by ~12% before the model under-delivered against it.
+    from tools.make_script import WORDS_PER_MINUTE, scenes_for_minutes, target_words
+
+    assert WORDS_PER_MINUTE == 196.0
+    assert target_words(7.5, 8.5) == 1568       # 8 min at the measured rate
+    assert scenes_for_minutes(7.5, 8.5) == 52   # 1568 words / 30 words per beat
