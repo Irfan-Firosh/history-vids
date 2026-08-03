@@ -335,13 +335,15 @@ def scenes_for_minutes(
 
 def build_and_save(
     topic: str, scenes: int | None = None, min_minutes: float = 6.0, max_minutes: float = 9.0,
-    log=print,
+    log=print, skip_rubric: bool = False,
 ) -> Path:
     """topic → research → script; write storyboard.json/sources.json/qc.md. Returns the output dir.
 
     Shared by the CLI and the dashboard's run_pipeline orchestrator. ``scenes`` overrides the beat
     count; otherwise it's derived from the ``min_minutes``-``max_minutes`` band. ``log`` is any
     line-logger (``print`` or ``RunRecorder.log``) so progress shows up wherever the caller wants it.
+    ``skip_rubric`` bypasses the script-craft gate below (see ``--skip-rubric``) — the escape hatch for
+    an informed operator who wants to render anyway; it never bypasses itself by accident.
     """
     scenes = scenes or scenes_for_minutes(min_minutes, max_minutes)
     budget = target_words(min_minutes, max_minutes)
@@ -380,14 +382,20 @@ def build_and_save(
     if report.out_of_range:
         log(f"  ⚠ script cited sources that do not exist: {list(report.out_of_range)}")
 
-    # Score against the reference script-craft rubric too — informational only (never gates the
-    # render), but persisted so the operator can see how the writing measured up, not just whether
-    # it's grounded.
+    # Script-craft gate, also BEFORE any image/TTS spend and beside the grounding gate. Grounding
+    # asks "is this true?"; the rubric asks "will anyone watch it?" — measured on an age-controlled
+    # cohort where the only variable was the writing. Thresholds calibrated in
+    # tools/calibrate_rubric.py; see tasks/lessons.md.
     rubric_report = score_script([s.narration for s in storyboard.scenes])
-    log(f"rubric: {rubric_report.summary()}" + (
-        "" if rubric_report.ok
-        else f" — below reference thresholds: {'; '.join(rubric_report.failures)}"
-    ))
+    log(f"rubric: {rubric_report.summary()}")
+    if not rubric_report.ok and not skip_rubric:
+        raise RuntimeError(
+            "script fails the craft rubric; refusing to render:\n  - "
+            + "\n  - ".join(rubric_report.failures)
+            + "\nRe-run the topic, or pass --skip-rubric to render anyway."
+        )
+    if not rubric_report.ok:
+        log(f"  ⚠ rubric bypassed via --skip-rubric ({len(rubric_report.failures)} failures)")
 
     out = OUT_DIR / _slug(topic)
     out.mkdir(parents=True, exist_ok=True)
@@ -410,9 +418,15 @@ def main() -> None:
     ap.add_argument("--min-minutes", type=float, default=6.0)
     ap.add_argument("--max-minutes", type=float, default=9.0)
     ap.add_argument("--scenes", type=int, default=None, help="override the beat count (else derived)")
+    ap.add_argument(
+        "--skip-rubric", action="store_true",
+        help="render even if the script fails the craft rubric (informed-operator escape hatch)",
+    )
     args = ap.parse_args()
 
-    out = build_and_save(args.topic, args.scenes, args.min_minutes, args.max_minutes)
+    out = build_and_save(
+        args.topic, args.scenes, args.min_minutes, args.max_minutes, skip_rubric=args.skip_rubric,
+    )
     print(f"\n✅ {out}/  (storyboard.json · sources.json · qc.md)")
     print(f"   → render: python tools/studio_poc.py --images gemini --voice cartesia "
           f"--storyboard {out / 'storyboard.json'}")

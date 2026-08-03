@@ -18,8 +18,11 @@ from pydantic import BaseModel, ConfigDict
 MAX_FIRST_QUESTION_SEC = 45.0
 #: Second-person density AFTER the hook is what separates winners; the opening always has it.
 MIN_2P_AFTER_90S_PER_1K = 8.0
-#: Winner 14.0 words; underperformer 28.4.
-MAX_MEAN_SENTENCE_WORDS = 17.0
+#: Calibrated to the SHORT-FORM pole (this channel targets 6-9 min, the Axen/ThenFolk shape),
+#: not the long-form Mack/Stickly ~22-min pole. §13 splits this check ≤17.0w long-form /
+#: ≤15.0w short-form; every measured Axen/ThenFolk winner tops out at 13.9w (Axen 635K) — 15.0
+#: leaves margin without passing anything the envelope calls bloated (lessons.md 2026-08-03).
+MAX_MEAN_SENTENCE_WORDS = 15.0
 #: Winner 31% of sentences under 8 words; underperformer 2.4%.
 MIN_SHORT_SENTENCE_PCT = 25.0
 #: Winner 14% over 25 words; underperformer 51%.

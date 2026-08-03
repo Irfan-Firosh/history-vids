@@ -1127,8 +1127,13 @@ def test_build_and_save_persists_script_prompt_and_rubric(monkeypatch, tmp_path)
     monkeypatch.setattr(make_script, "OUT_DIR", tmp_path / "scripts")
     monkeypatch.setenv("LLM_API_KEY", "sk-super-secret-value-should-never-leak")
 
+    # skip_rubric=True: this test is about the prompt/rubric *paper trail*, not gate behavior
+    # (that's covered below) — the 1-sentence fixture narration can never cross the 90s/294-word
+    # mark the second-person-retention check measures, so it always fails that check regardless of
+    # quality.
     out = make_script.build_and_save(
         "Test Topic", scenes=1, min_minutes=1.0, max_minutes=2.0, log=lambda *a, **k: None,
+        skip_rubric=True,
     )
 
     prompt_text = (out / "script_prompt.txt").read_text()
@@ -1140,6 +1145,110 @@ def test_build_and_save_persists_script_prompt_and_rubric(monkeypatch, tmp_path)
     rubric_data = json.loads((out / "rubric.json").read_text())
     assert rubric_data["words"] > 0
     assert "failures" in rubric_data
+
+
+def _grounded_fake_chat_returning(scenes_json):
+    """Build a fake LLMScriptProvider._chat that satisfies the grounding gate (6 cited sources) and
+    returns the given scenes payload for the script-generation call."""
+    import json as _json
+
+    def fake_chat(self, system, user, temperature=None):
+        if system is QUERY_SYSTEM_PROMPT:
+            return _json.dumps({"queries": [f"q{i}" for i in range(6)]})
+        if system is CALLOUT_ANALYSIS_SYSTEM_PROMPT:
+            return _json.dumps({"callouts": [], "intense": []})
+        return _json.dumps({"title": "Test Topic", "scenes": scenes_json})
+
+    return fake_chat
+
+
+class _FakeExaSixSources:
+    name = "fake-exa"
+
+    def __init__(self, *a, **k):
+        pass
+
+    def search(self, query, num_results=8):
+        return [ResearchSource(
+            title=f"Source {query}", url=f"http://src/{query}", snippet="a real fact"
+        )]
+
+
+def test_build_and_save_raises_when_the_script_fails_the_rubric(monkeypatch, tmp_path):
+    # The rubric gate sits beside the grounding gate, BEFORE any image/TTS spend. A script with no
+    # question mark anywhere fails unambiguously (studio/script_rubric.py), so build_and_save must
+    # refuse to render it rather than silently proceeding — this is the whole point of Task 2.2.
+    import tools.make_script as make_script
+
+    # Long, question-free, un-numbered prose — guaranteed to fail the rubric regardless of
+    # thresholds.
+    loser_narration = " ".join(["word"] * 30) + "."
+    scenes = [
+        {"narration": loser_narration, "image_prompt": "p", "shot_type": "concept", "cite": [1]}
+        for _ in range(8)
+    ]
+
+    monkeypatch.setattr(make_script, "ExaResearchProvider", _FakeExaSixSources)
+    monkeypatch.setattr(
+        make_script.LLMScriptProvider, "_chat", _grounded_fake_chat_returning(scenes)
+    )
+    monkeypatch.setattr(make_script, "OUT_DIR", tmp_path / "scripts")
+    monkeypatch.setenv("LLM_API_KEY", "sk-test")
+
+    with pytest.raises(RuntimeError, match="fails the craft rubric"):
+        make_script.build_and_save(
+            "Test Topic", scenes=8, min_minutes=1.0, max_minutes=2.0, log=lambda *a, **k: None,
+        )
+    # Refusing to render means nothing was ever written to disk — no wasted downstream artifacts.
+    assert not (tmp_path / "scripts").exists()
+
+
+def test_build_and_save_skip_rubric_bypasses_the_gate(monkeypatch, tmp_path):
+    # --skip-rubric is the informed operator's escape hatch: the gate must be able to be bypassed on
+    # purpose, never by accident, and the failing report must still land on disk for inspection.
+    import json
+
+    import tools.make_script as make_script
+
+    loser_narration = " ".join(["word"] * 30) + "."
+    scenes = [
+        {"narration": loser_narration, "image_prompt": "p", "shot_type": "concept", "cite": [1]}
+        for _ in range(8)
+    ]
+
+    monkeypatch.setattr(make_script, "ExaResearchProvider", _FakeExaSixSources)
+    monkeypatch.setattr(
+        make_script.LLMScriptProvider, "_chat", _grounded_fake_chat_returning(scenes)
+    )
+    monkeypatch.setattr(make_script, "OUT_DIR", tmp_path / "scripts")
+    monkeypatch.setenv("LLM_API_KEY", "sk-test")
+
+    out = make_script.build_and_save(
+        "Test Topic", scenes=8, min_minutes=1.0, max_minutes=2.0, log=lambda *a, **k: None,
+        skip_rubric=True,
+    )
+
+    rubric_data = json.loads((out / "rubric.json").read_text())
+    assert rubric_data["failures"]  # still recorded as failing, just not blocked
+
+
+def test_score_script_rejects_the_underperformer_shape_and_accepts_the_winner_shape():
+    # Calibration sanity check (Task 2.2): a realistic winner-shaped script — early question,
+    # second person sustained past the 90s mark, short punchy sentences, concrete numbers —
+    # passes; a loser-shaped script (no question, no numbers, sentence bloat) fails. The winner
+    # fixture must be long enough to actually cross the 90s/294-word retention-measurement window,
+    # or the second-person-after-90s check has no body text to measure and fails structurally
+    # regardless of content quality (see tasks/lessons.md 2026-08-03).
+    from studio.script_rubric import score_script
+
+    winner_block = [
+        "You wake up cold. Why did they leave? Nobody knows.",
+        "In 1905, 12 families walked out. You would have too. It was 40 below.",
+    ]
+    loser = [" ".join(["word"] * 30) + "." for _ in range(8)]
+
+    assert score_script(winner_block * 14).ok
+    assert not score_script(loser).ok
 
 
 # ── caption cues (short timed subtitles) ───────────────────────────────────────
