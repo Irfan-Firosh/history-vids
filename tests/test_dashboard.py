@@ -551,6 +551,111 @@ def test_resume_explicit_captions_overrides_manifest_settings(client, monkeypatc
     assert "--no-captions" not in captured["cmd"]
 
 
+# ── prompts (script prompt paper trail + per-scene image prompts) ──────────────
+def test_get_prompts_returns_script_prompt_and_image_prompts(client):
+    run = dash.RUNS_DIR / "20260101-000000"
+    (run / "script_prompt.txt").write_text(
+        "=== SYSTEM ===\nwrite calmly\n\n=== USER ===\nTOPIC: x\n"
+    )
+    r = client.get("/api/runs/20260101-000000/prompts")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["script_prompt"].startswith("=== SYSTEM ===")
+    assert body["image_prompts"] == [
+        {"index": 0, "shot_type": "character", "prompt": "p", "image_path": "img_0.png",
+         "status": "rendered", "narration": ""},
+    ]
+
+
+def test_get_prompts_missing_script_prompt_returns_null(client):
+    # The fixture run predates this feature — no script_prompt.txt on disk. Must be 200 with a null,
+    # not a 500 — the dashboard shows historical runs that never wrote this file.
+    r = client.get("/api/runs/20260101-000000/prompts")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["script_prompt"] is None
+    assert body["image_prompts"]  # scene data still comes straight from the manifest either way
+
+
+def test_get_prompts_old_run_with_no_scenes_returns_empty_list(client):
+    # A bare run dir — no script_prompt.txt, no scenes recorded at all.
+    run = dash.RUNS_DIR / "20250101-000000"
+    run.mkdir(parents=True)
+    (run / "run.json").write_text(json.dumps({
+        "run_id": "20250101-000000", "title": "Old", "images_provider": "placeholder",
+        "voice_provider": "say", "status": "completed", "scene_count": 0,
+        "started_at": "x", "updated_at": "y",
+    }))
+    r = client.get("/api/runs/20250101-000000/prompts")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["script_prompt"] is None
+    assert body["image_prompts"] == []
+
+
+def test_get_prompts_404_for_missing_run(client):
+    assert client.get("/api/runs/nope/prompts").status_code == 404
+
+
+# ── rubric (script-craft report, scored against studio.script_rubric thresholds) ─
+def test_get_rubric_returns_metrics_and_thresholds(client):
+    from studio.script_rubric import (
+        MAX_FIRST_QUESTION_SEC,
+        MAX_LONG_SENTENCE_PCT,
+        MAX_MEAN_SENTENCE_WORDS,
+        MIN_SHORT_SENTENCE_PCT,
+    )
+
+    run = dash.RUNS_DIR / "20260101-000000"
+    (run / "rubric.json").write_text(json.dumps({
+        "words": 1565, "first_question_sec": 23.4, "second_person_per_1k": 12.1,
+        "second_person_after_90s_per_1k": 9.8, "mean_sentence_words": 11.2,
+        "short_sentence_pct": 34.0, "long_sentence_pct": 4.1, "numbers_per_1k": 14.0,
+        "failures": [],
+    }))
+    r = client.get("/api/runs/20260101-000000/rubric")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True
+    assert body["metrics"]["words"] == 1565
+    assert body["metrics"]["first_question_sec"] == 23.4
+    assert body["failures"] == []
+    assert body["thresholds"] == {
+        "max_first_question_sec": MAX_FIRST_QUESTION_SEC,
+        "max_mean_sentence_words": MAX_MEAN_SENTENCE_WORDS,
+        "min_short_sentence_pct": MIN_SHORT_SENTENCE_PCT,
+        "max_long_sentence_pct": MAX_LONG_SENTENCE_PCT,
+    }
+
+
+def test_get_rubric_with_failures_reports_not_ok(client):
+    run = dash.RUNS_DIR / "20260101-000000"
+    (run / "rubric.json").write_text(json.dumps({
+        "words": 10, "first_question_sec": None, "second_person_per_1k": 0.0,
+        "second_person_after_90s_per_1k": 0.0, "mean_sentence_words": 30.0,
+        "short_sentence_pct": 0.0, "long_sentence_pct": 100.0, "numbers_per_1k": 0.0,
+        "failures": ["no question mark anywhere — the hook never asks anything"],
+    }))
+    r = client.get("/api/runs/20260101-000000/rubric")
+    body = r.json()
+    assert body["ok"] is False
+    assert body["failures"] == ["no question mark anywhere — the hook never asks anything"]
+
+
+def test_get_rubric_missing_file_returns_nulls_but_keeps_thresholds(client):
+    # The fixture run predates this feature — no rubric.json on disk. Must be 200, not 500, and the
+    # thresholds (static config, not per-run data) are still available even with no report to show.
+    r = client.get("/api/runs/20260101-000000/rubric")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is None and body["metrics"] is None and body["failures"] is None
+    assert body["thresholds"]["max_first_question_sec"] == 45.0
+
+
+def test_get_rubric_404_for_missing_run(client):
+    assert client.get("/api/runs/nope/rubric").status_code == 404
+
+
 # ── settings persistence (dashboard is the consumer of RunSettings/RunStats) ───
 def test_trigger_run_persists_settings_onto_manifest(client, monkeypatch):
     """_spawn_run must write the operator's choices onto the new run's manifest at start, so a
