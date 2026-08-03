@@ -168,7 +168,7 @@ For every frame:
 ### 3d. Image generation endpoints
 | Provider | Endpoint | Model | Auth / notes |
 |---|---|---|---|
-| **agnes** (default) | `POST https://apihub.agnes-ai.com/v1/images/generations` | `agnes-image-2.1-flash` | `AGNES_API_KEY`; free tier **RPM 20** → one shared `studio.rate_limit.TokenBucket` (not a per-instance sleep) paces every request across the parallel image loop's worker threads + retries; `1024x576` → scaled to 1920×1080 |
+| **agnes** (default) | `POST https://apihub.agnes-ai.com/v1/images/generations` | `agnes-image-2.1-flash` | `AGNES_API_KEY`; free tier **RPM 20** → one shared `studio.rate_limit.TokenBucket` (not a per-instance sleep) paces every request across the parallel image loop's worker threads + retries; `1024x576` requested but **Agnes ignores it** — probed 2026-08-03, all sizes return 1312×736, so the real upscale to 1920×1080 is ~1.46×, not 1.875× |
 | **gemini** | `POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key=…` | `gemini-2.5-flash-image` | `GEMINI_API_KEY` (billing); ref-conditioning (REF-1/REF-2); ~$0.039/img |
 | **placeholder** | local PIL | — | offline demo, no network |
 | **cloudflare** / **hf** | Workers AI FLUX.2 / HF Inference | kept in code, **not offered** (slow / weaker) | — |

@@ -100,6 +100,13 @@ is length-agnostic, so this is reversible.
   `CartesiaTimestampVoice` exists and the pipeline requests `add_timestamps`.
 - **Every frame is upscaled.** `agnes.DEFAULT_SIZE = "1024x576"` → 1920×1080 is a 1.875× upscale.
   Reference linework is ~3 px at native 1080p; upscaling softens exactly the thin-line signature.
+  - **CORRECTED 2026-08-03 by measurement.** The 1.875× figure was inferred from the constant, not
+    measured. Agnes **ignores the `size` parameter**: requesting 1920×1080, 1536×864 and 1024×576
+    each returned a **1312×736** image (14.2 s / 14.3 s / 16.3 s). The real upscale is **~1.46×**,
+    and it cannot be reduced by requesting more pixels — Task 6.2's premise does not hold. The
+    delivered aspect (1.7826) is also marginally off 16:9 (1.7778), so there is a slight crop.
+    Recovering native-resolution linework needs a different model or a post-generation upscaler,
+    not a parameter change.
 - **Run settings are not persisted.** `RunManifest` has no `captions` field, so re-run and resume
   silently fall back to defaults (`dashboard/app.py:328`).
 - **Reference images do not exist.** `assets/refs/character.png` and `expressions.png` are absent;

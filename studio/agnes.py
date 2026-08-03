@@ -18,7 +18,12 @@ from collections.abc import Sequence
 
 ENDPOINT = "https://apihub.agnes-ai.com/v1/images/generations"
 DEFAULT_MODEL = "agnes-image-2.1-flash"
-DEFAULT_SIZE = "1024x576"  # 16:9 (scaled/cropped to 1920x1080 downstream)
+#: Requested generation size. **Advisory only — Agnes ignores it.** Probed 2026-08-03: requesting
+#: 1920x1080, 1536x864 and 1024x576 each returned a 1312x736 image (14.2s / 14.3s / 16.3s). So the
+#: real upscale to 1920x1080 is ~1.46x, not the 1.875x this constant implies, and it cannot be
+#: reduced by asking for more pixels. Overridable via the ``AGNES_SIZE`` env var (read in
+#: ``tools/``), kept so a future model that honours the parameter needs no code change.
+DEFAULT_SIZE = "1024x576"
 
 
 class AgnesError(RuntimeError):
