@@ -988,9 +988,17 @@ def _load_style_envelope():
     raw = json.loads(_STYLE_ENVELOPE_PATH.read_text())
     return Envelope(
         saturation=tuple(raw["saturation"]),
-        colour_bins=tuple(raw["colour_bins"]),
+        # Absent = MEASURED BUT NOT ENFORCED (see the envelope's _provenance).
+        colour_bins=tuple(raw["colour_bins"]) if raw.get("colour_bins") else None,
         near_white_pct=tuple(raw["near_white_pct"]),
     )
+
+
+#: Probe frames the style gate samples before the main image loop. One frame is a sample size of
+#: one for a stochastic generator, judged against an envelope built from 2,703 reference frames —
+#: run 20260803-113248 was refused that way after paying for research, script and TTS. Three costs
+#: two extra images against the ~60 the gate protects.
+STYLE_PROBE_FRAMES = 3
 
 
 def _style_preflight(rec, sb, images: ImageProviders, channel_refs, skip_style_check: bool) -> None:
@@ -1007,41 +1015,56 @@ def _style_preflight(rec, sb, images: ImageProviders, channel_refs, skip_style_c
     import numpy as np
     from PIL import Image
 
-    from studio.style_metrics import conforms, measure_frame
+    from studio.style_metrics import conforms, measure_frame, median_metrics
 
     sc0 = sb.scenes[0]
     is_char = shot_uses_character(sc0.shot_type)
     provider = images.character if is_char else images.concept
     refs = channel_refs if is_char else []
 
-    existing = rec.dir / _frame_name(0, 0)
-    generated = not existing.is_file()
-    if generated:
-        styled = styled_prompt(
-            sc0.image_prompt, sb.style, use_character_ref=bool(refs), shot_type=sc0.shot_type
+    # Frames already on disk are free samples. A resume must never pay to re-probe what it
+    # already generated, so when ANY exist we measure those and generate nothing.
+    on_disk = sorted(rec.dir.glob("img_*.png"))[:STYLE_PROBE_FRAMES]
+    samples: list = list(on_disk)
+    made: list = []
+    if samples:
+        rec.log(
+            f"style pre-flight: measuring {len(samples)} frame(s) already on disk (no new spend)"
         )
-        probe_path = rec.dir / "style_probe.png"
-        rec.log(f"style pre-flight: generating probe frame ({provider.name}) before the image loop…")
+    styled = styled_prompt(
+        sc0.image_prompt, sb.style, use_character_ref=bool(refs), shot_type=sc0.shot_type
+    )
+    while not on_disk and len(samples) < STYLE_PROBE_FRAMES:
+        probe_path = rec.dir / f"style_probe_{len(made)}.png"
+        rec.log(
+            f"style pre-flight: probe frame {len(samples) + 1}/{STYLE_PROBE_FRAMES} "
+            f"({provider.name}) before the image loop…"
+        )
         provider.generate(styled, probe_path, refs)
-    else:
-        probe_path = existing
-        rec.log("style pre-flight: reusing scene 0's frame already on disk (no new spend)")
+        samples.append(probe_path)
+        made.append(probe_path)
 
     try:
-        metrics = measure_frame(np.asarray(Image.open(probe_path).convert("RGB")))
+        frames = [
+            measure_frame(np.asarray(Image.open(pth).convert("RGB"))) for pth in samples
+        ]
     finally:
-        if generated:
-            probe_path.unlink(missing_ok=True)
+        for pth in made:
+            pth.unlink(missing_ok=True)
+    metrics = median_metrics(frames)
 
     ok, failures = conforms(metrics, _load_style_envelope())
     if ok:
         rec.log("style pre-flight: PASS — probe frame is inside the reference envelope")
         return
     msg = (
-        "style pre-flight FAILED — the first frame drifted outside the reference envelope:\n  - "
+        f"style pre-flight FAILED — the median of {len(frames)} probe frames drifted outside "
+        f"the reference envelope:\n  - "
         + "\n  - ".join(failures)
         + "\nRefusing to render the rest of the run (would pay for the remaining images). "
-        "Fix LOCKED_STYLE and re-run, or pass --skip-style-check to render anyway."
+        f"The research, script and narration for this run are already on disk and are NOT lost: "
+        f"resume with --run-id {rec.run_id} once the style is fixed, and they will be reused. "
+        "Fix LOCKED_STYLE and resume, or pass --skip-style-check to render anyway."
     )
     rec.log(f"ERROR: {msg}")
     raise RuntimeError(msg)

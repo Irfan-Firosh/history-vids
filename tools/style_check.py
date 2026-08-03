@@ -43,7 +43,8 @@ def load_envelope() -> Envelope:
     raw = json.loads(ENVELOPE_PATH.read_text())
     return Envelope(
         saturation=tuple(raw["saturation"]),
-        colour_bins=tuple(raw["colour_bins"]),
+        # Absent = MEASURED BUT NOT ENFORCED (see the envelope's _provenance).
+        colour_bins=tuple(raw["colour_bins"]) if raw.get("colour_bins") else None,
         near_white_pct=tuple(raw["near_white_pct"]),
     )
 

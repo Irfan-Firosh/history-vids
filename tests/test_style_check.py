@@ -100,8 +100,9 @@ def test_envelope_admits_its_own_reference_channels_mean():
     for channel in (axen, mack):
         lo, hi = envelope.saturation
         assert lo < channel["saturation"] < hi
-        lo, hi = envelope.colour_bins
-        assert lo < channel["colour_bins"] < hi
+        if envelope.colour_bins is not None:  # ungated since 2026-08-03, see _provenance
+            lo, hi = envelope.colour_bins
+            assert lo < channel["colour_bins"] < hi
         lo, hi = envelope.near_white_pct
         assert lo < channel["near_white_pct"] < hi
 
@@ -118,7 +119,10 @@ def test_envelope_still_refuses_known_off_style_channels():
     }
     for name, (sat, bins, white) in known_bad.items():
         sat_ok = envelope.saturation[0] <= sat <= envelope.saturation[1]
-        bins_ok = envelope.colour_bins[0] <= bins <= envelope.colour_bins[1]
+        bins_ok = (
+            True if envelope.colour_bins is None
+            else envelope.colour_bins[0] <= bins <= envelope.colour_bins[1]
+        )
         white_ok = envelope.near_white_pct[0] <= white <= envelope.near_white_pct[1]
         assert not (sat_ok and bins_ok and white_ok), f"{name} should still fail >=1 metric"
 
@@ -149,7 +153,9 @@ def test_off_style_frame_fails_recalibrated_envelope_on_every_metric():
     metrics = measure_frame(_off_style_frame())
     ok, failures = conforms(metrics, envelope)
     assert not ok
-    assert len(failures) == 3
+    # colour_bins is measured but no longer enforced (2026-08-03); the name says "every metric",
+    # and every metric that is still GATED must fail.
+    assert len(failures) == 2
 
 
 # ── tools/style_check.py: load_envelope / check ─────────────────────────────────────────────
@@ -269,7 +275,8 @@ def test_style_preflight_aborts_before_any_scene_frame_is_generated(tmp_path, mo
         )
 
     assert loop_calls == []  # the main per-scene loop was never reached
-    assert len(bad_provider.calls) == 1  # exactly one probe frame was generated, not a full run
+    # STYLE_PROBE_FRAMES probes, not a full run: one frame is a sample size of one
+    assert len(bad_provider.calls) == studio_poc.STYLE_PROBE_FRAMES
 
 
 def test_style_preflight_passes_and_the_main_loop_is_reached(tmp_path, monkeypatch):
@@ -290,7 +297,8 @@ def test_style_preflight_passes_and_the_main_loop_is_reached(tmp_path, monkeypat
 
     assert out is None
     assert loop_calls == [1]  # the main loop DID run, once, for the one scene
-    assert len(good_provider.calls) == 1  # one probe frame generated for the gate
+    # STYLE_PROBE_FRAMES probes: one frame cannot judge a stochastic generator
+    assert len(good_provider.calls) == studio_poc.STYLE_PROBE_FRAMES
 
 
 def test_skip_style_check_bypasses_the_probe_entirely(tmp_path, monkeypatch):
