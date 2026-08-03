@@ -31,6 +31,7 @@ from studio.research import (
     strip_citation_markers,
 )
 from studio.run_log import RunManifest, RunRecorder, SceneRecord, new_run_id
+from studio.script_rubric import RubricReport, score_script
 from studio.shots import MAX_SHOT_SEC, MIN_SHOT_SEC, WORDS_PER_SHOT, Shot, plan_shots, split_clauses
 from studio.storyboard import DEMO_STORYBOARD, storyboard_from_dict
 from studio.style import CONCEPT_STYLE, LOCKED_STYLE, styled_prompt, thumbnail_prompt
@@ -89,4 +90,6 @@ __all__ = [
     "RunManifest",
     "SceneRecord",
     "new_run_id",
+    "RubricReport",
+    "score_script",
 ]
