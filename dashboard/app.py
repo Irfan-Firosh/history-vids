@@ -24,6 +24,12 @@ from pydantic import BaseModel
 
 from studio import RunRecorder, new_run_id
 from studio.run_log import RunSettings
+from studio.script_rubric import (
+    MAX_FIRST_QUESTION_SEC,
+    MAX_LONG_SENTENCE_PCT,
+    MAX_MEAN_SENTENCE_WORDS,
+    MIN_SHORT_SENTENCE_PCT,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RUNS_DIR = REPO_ROOT / "result/axen/poc/runs"
@@ -44,6 +50,16 @@ _lock = threading.Lock()
 
 ImageModel = Literal["placeholder", "gemini", "agnes", "hf", "cloudflare"]
 _IMAGE_MODELS: tuple[str, ...] = get_args(ImageModel)  # valid provider names (re-run coercion)
+
+#: Rubric thresholds surfaced to the dashboard, read from the real constants in
+#: studio.script_rubric — never a second hardcoded copy, so the UI's pass/fail bars can't drift
+#: from what the rubric actually enforces.
+_RUBRIC_THRESHOLDS: dict[str, float] = {
+    "max_first_question_sec": MAX_FIRST_QUESTION_SEC,
+    "max_mean_sentence_words": MAX_MEAN_SENTENCE_WORDS,
+    "min_short_sentence_pct": MIN_SHORT_SENTENCE_PCT,
+    "max_long_sentence_pct": MAX_LONG_SENTENCE_PCT,
+}
 
 
 class RunRequest(BaseModel):
@@ -119,6 +135,28 @@ def _read_manifest(run_dir: Path) -> dict | None:
         return json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return None  # a mid-flush read can race; the client just polls again
+
+
+def _read_text(path: Path) -> str | None:
+    """Read a run-dir text file if present; None (never a 500) when it's missing or unreadable —
+    the dashboard shows historical runs recorded before the file existed."""
+    if not path.is_file():
+        return None
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+def _read_json(path: Path) -> dict | None:
+    """Read a run-dir JSON file if present; None (never a 500) for a missing/mid-write/corrupt
+    file — same defensive contract as ``_read_manifest``."""
+    if not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
 
 
 def _is_active(run_id: str, mode: str | None = None) -> bool:
@@ -248,6 +286,53 @@ def get_run(run_id: str) -> JSONResponse:
 def get_log(run_id: str) -> str:
     log = _run_dir(run_id) / "log.txt"
     return log.read_text(encoding="utf-8") if log.is_file() else ""
+
+
+@app.get("/api/runs/{run_id}/prompts")
+def get_prompts(run_id: str) -> JSONResponse:
+    """The rendered script prompt + every scene's image prompt — the paper trail behind what was
+    asked and what was drawn. ``script_prompt`` is null for runs recorded before
+    ``script_prompt.txt`` was persisted (see ``tools/make_script.py::build_and_save``); the image
+    prompts always come straight from the manifest's scene records, old runs included."""
+    run_dir = _run_dir(run_id)  # 404 + traversal-guarded
+    manifest = _read_manifest(run_dir) or {}
+    image_prompts = [
+        {
+            "index": s.get("index"),
+            "shot_type": s.get("shot_type"),
+            "prompt": s.get("image_prompt"),
+            "image_path": s.get("image_path"),
+            "status": s.get("status"),
+            "narration": s.get("narration", ""),
+        }
+        for s in manifest.get("scenes", [])
+    ]
+    return JSONResponse({
+        "script_prompt": _read_text(run_dir / "script_prompt.txt"),
+        "image_prompts": image_prompts,
+    })
+
+
+@app.get("/api/runs/{run_id}/rubric")
+def get_rubric(run_id: str) -> JSONResponse:
+    """The script-craft rubric report, scored against the thresholds in ``studio.script_rubric``.
+
+    ``ok``/``metrics``/``failures`` are null for runs recorded before ``rubric.json`` was persisted
+    (see ``tools/make_script.py::build_and_save``); ``thresholds`` is static config, not per-run
+    data, so it's always populated even with no report to show it against.
+    """
+    run_dir = _run_dir(run_id)  # 404 + traversal-guarded
+    data = _read_json(run_dir / "rubric.json")
+    if data is None:
+        return JSONResponse(
+            {"ok": None, "metrics": None, "thresholds": _RUBRIC_THRESHOLDS, "failures": None}
+        )
+    failures = list(data.get("failures") or [])
+    metrics = {k: v for k, v in data.items() if k != "failures"}
+    return JSONResponse(
+        {"ok": not failures, "metrics": metrics, "thresholds": _RUBRIC_THRESHOLDS,
+         "failures": failures}
+    )
 
 
 @app.get("/api/runs/{run_id}/file/{name:path}")

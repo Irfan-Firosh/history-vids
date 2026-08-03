@@ -1060,6 +1060,88 @@ def test_generate_strips_citation_markers_before_saving(monkeypatch):
     assert data["scenes"][0]["cite"] == [1]
 
 
+def test_generate_records_the_full_rendered_prompt_on_the_provider(monkeypatch):
+    # The rendered script prompt (system + user, including the research brief) is otherwise never
+    # written anywhere — once a run finishes there is no record of what was actually asked.
+    # generate() must capture it on the instance so build_and_save can persist it to disk.
+    from tools.make_script import LLMScriptProvider
+
+    class OneSource:
+        name = "fake"
+
+        def search(self, query, num_results=6):
+            return [ResearchSource(title="Tank report", url="http://a", snippet="fifty foot tank")]
+
+    def fake_chat(system, user, temp=None):
+        if system is QUERY_SYSTEM_PROMPT:
+            return '{"queries": ["q1"]}'
+        if system is CALLOUT_ANALYSIS_SYSTEM_PROMPT:
+            return '{"callouts": [], "intense": []}'
+        return '{"title": "T", "scenes": [{"narration": "n", "image_prompt": "p", "cite": [1]}]}'
+
+    prov = LLMScriptProvider(research=OneSource())
+    monkeypatch.setattr(prov, "_chat", fake_chat)
+    assert prov.last_prompt is None  # nothing sent yet
+    prov.generate("topic", num_scenes=1)
+    assert prov.last_prompt is not None
+    assert "fifty foot tank" in prov.last_prompt  # the research brief reached the recorded prompt
+    assert "topic" in prov.last_prompt
+    assert SCRIPT_SYSTEM_PROMPT in prov.last_prompt  # the system prompt is captured too
+
+
+def test_build_and_save_persists_script_prompt_and_rubric(monkeypatch, tmp_path):
+    # End-to-end: a topic → the script-generation stage must leave a paper trail on disk for both
+    # gaps the dashboard needs to close — the exact LLM prompt, and the numeric rubric report.
+    import json
+
+    import tools.make_script as make_script
+
+    class FakeExa:
+        name = "fake-exa"
+
+        def __init__(self, *a, **k):
+            pass
+
+        def search(self, query, num_results=8):
+            return [ResearchSource(
+                title=f"Source {query}", url=f"http://src/{query}", snippet="a real fact"
+            )]
+
+    def fake_chat(self, system, user, temperature=None):
+        if system is QUERY_SYSTEM_PROMPT:
+            return json.dumps({"queries": [f"q{i}" for i in range(6)]})
+        if system is CALLOUT_ANALYSIS_SYSTEM_PROMPT:
+            return json.dumps({"callouts": [], "intense": []})
+        return json.dumps({
+            "title": "Test Topic",
+            "scenes": [{
+                "narration": "Why did they leave? You know the tank burst in 1919.",
+                "image_prompt": "a simple concept scene",
+                "shot_type": "concept",
+                "cite": [1],
+            }],
+        })
+
+    monkeypatch.setattr(make_script, "ExaResearchProvider", FakeExa)
+    monkeypatch.setattr(make_script.LLMScriptProvider, "_chat", fake_chat)
+    monkeypatch.setattr(make_script, "OUT_DIR", tmp_path / "scripts")
+    monkeypatch.setenv("LLM_API_KEY", "sk-super-secret-value-should-never-leak")
+
+    out = make_script.build_and_save(
+        "Test Topic", scenes=1, min_minutes=1.0, max_minutes=2.0, log=lambda *a, **k: None,
+    )
+
+    prompt_text = (out / "script_prompt.txt").read_text()
+    assert "Test Topic" in prompt_text
+    assert "a real fact" in prompt_text  # the research brief reached the persisted prompt
+    assert SCRIPT_SYSTEM_PROMPT in prompt_text
+    assert "sk-super-secret-value-should-never-leak" not in prompt_text  # no credential leakage
+
+    rubric_data = json.loads((out / "rubric.json").read_text())
+    assert rubric_data["words"] > 0
+    assert "failures" in rubric_data
+
+
 # ── caption cues (short timed subtitles) ───────────────────────────────────────
 def test_split_caption_cues_keeps_chunks_short():
     text = "You stir before dawn, the cold air biting as the fire crackles for the first time."

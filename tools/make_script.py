@@ -22,7 +22,7 @@ sys.path.insert(0, str(_ROOT))
 
 from dotenv import load_dotenv  # noqa: E402
 
-from studio import format_research_brief, llm, storyboard_from_dict  # noqa: E402
+from studio import format_research_brief, llm, score_script, storyboard_from_dict  # noqa: E402
 from studio.research import (  # noqa: E402
     MIN_CITATION_COVERAGE,
     MIN_SOURCES,
@@ -119,6 +119,16 @@ class ExaResearchProvider:
         return sources
 
 
+def _render_script_prompt(system: str, user: str) -> str:
+    """The full text sent to the script LLM, formatted for human review.
+
+    Persisted verbatim to ``script_prompt.txt`` in the run directory (see ``build_and_save``) so an
+    operator can see exactly what was asked once a run finishes — this is built only from the prompt
+    templates + topic + research brief, and never touches API keys or other credentials.
+    """
+    return f"=== SYSTEM ===\n{system}\n\n=== USER ===\n{user}\n"
+
+
 class LLMScriptProvider:
     """Topic → grounded Storyboard via the local OpenAI-compatible endpoint (gpt-oss:120b)."""
 
@@ -130,6 +140,7 @@ class LLMScriptProvider:
         self.key = key or os.environ.get("LLM_API_KEY")
         self.model = model or os.environ.get("LLM_SCRIPT_MODEL", "gpt-oss:120b")
         self.temperature = temperature
+        self.last_prompt: str | None = None  # full rendered prompt from the last generate() call
 
     def _chat(self, system: str, user: str, temperature: float | None = None) -> str:
         import time
@@ -200,6 +211,9 @@ class LLMScriptProvider:
             topic, brief, num_scenes, min_minutes, max_minutes,
             total_words=target_words(min_minutes, max_minutes), words_per_beat=WORDS_PER_BEAT,
         )
+        # Record the exact text sent to the script LLM before the call, so build_and_save can
+        # persist it — otherwise nothing on disk shows what was actually asked.
+        self.last_prompt = _render_script_prompt(SCRIPT_SYSTEM_PROMPT, user)
         text = self._chat(SCRIPT_SYSTEM_PROMPT, user)
         data = llm.parse_json_block(text)
         # Strip inline [n] markers BEFORE the callout pass and before anything is written to disk:
@@ -366,6 +380,15 @@ def build_and_save(
     if report.out_of_range:
         log(f"  ⚠ script cited sources that do not exist: {list(report.out_of_range)}")
 
+    # Score against the reference script-craft rubric too — informational only (never gates the
+    # render), but persisted so the operator can see how the writing measured up, not just whether
+    # it's grounded.
+    rubric_report = score_script([s.narration for s in storyboard.scenes])
+    log(f"rubric: {rubric_report.summary()}" + (
+        "" if rubric_report.ok
+        else f" — below reference thresholds: {'; '.join(rubric_report.failures)}"
+    ))
+
     out = OUT_DIR / _slug(topic)
     out.mkdir(parents=True, exist_ok=True)
     (out / "storyboard.json").write_text(json.dumps(data, indent=2, ensure_ascii=False))
@@ -373,6 +396,10 @@ def build_and_save(
         json.dumps([s.model_dump() for s in sources], indent=2, ensure_ascii=False)
     )
     (out / "qc.md").write_text(_qc_report(data, sources))
+    # Two paper-trail artifacts the dashboard exposes over the API (see dashboard/app.py): the exact
+    # prompt sent to the script LLM, and the numeric rubric report — neither was persisted before.
+    (out / "script_prompt.txt").write_text(provider.last_prompt or "")
+    (out / "rubric.json").write_text(rubric_report.model_dump_json(indent=2))
     return out
 
 
