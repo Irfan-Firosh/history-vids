@@ -56,6 +56,10 @@ class RubricReport(BaseModel):
     long_sentence_pct: float
     numbers_per_1k: float
     failures: tuple[str, ...] = ()
+    #: Metrics that PASS, in the same 'value (threshold)' shape as `failures`. A repair pass
+    #: needs its invariants as explicitly as its targets: run 20260803-111724 fixed second
+    #: person 8.0 -> 47.4 and collapsed numbers/1k 14.8 -> 0.62 doing it.
+    passing: tuple[str, ...] = ()
 
     @property
     def ok(self) -> bool:
@@ -123,6 +127,7 @@ def score_script(narrations: Sequence[str], wpm: float = 196.0) -> RubricReport:
         numbers_per_1k=len(_NUMBER.findall(text)) * per_1k,
     )
     failures: list[str] = []
+    passing: list[str] = []
     if report.first_question_sec is None:
         failures.append("no question mark anywhere — the hook never asks anything")
     elif report.first_question_sec > MAX_FIRST_QUESTION_SEC:
@@ -135,13 +140,27 @@ def score_script(narrations: Sequence[str], wpm: float = 196.0) -> RubricReport:
             f"second person {report.second_person_after_90s_per_1k:.2f}/1k after 90s "
             f"(min {MIN_2P_AFTER_90S_PER_1K})"
         )
+    else:
+        passing.append(
+            f"second person {report.second_person_after_90s_per_1k:.2f}/1k after 90s "
+            f"(min {MIN_2P_AFTER_90S_PER_1K})"
+        )
     if report.mean_sentence_words > MAX_MEAN_SENTENCE_WORDS:
         failures.append(
+            f"mean sentence {report.mean_sentence_words:.2f}w (max {MAX_MEAN_SENTENCE_WORDS})"
+        )
+    else:
+        passing.append(
             f"mean sentence {report.mean_sentence_words:.2f}w (max {MAX_MEAN_SENTENCE_WORDS})"
         )
     if report.short_sentence_pct < MIN_SHORT_SENTENCE_PCT:
         failures.append(
             f"only {report.short_sentence_pct:.1f}% short sentences "
+            f"(min {MIN_SHORT_SENTENCE_PCT:.0f}%)"
+        )
+    else:
+        passing.append(
+            f"{report.short_sentence_pct:.1f}% short sentences "
             f"(min {MIN_SHORT_SENTENCE_PCT:.0f}%)"
         )
     if report.long_sentence_pct > MAX_LONG_SENTENCE_PCT:
@@ -150,4 +169,8 @@ def score_script(narrations: Sequence[str], wpm: float = 196.0) -> RubricReport:
         )
     if report.numbers_per_1k < MIN_NUMBERS_PER_1K:
         failures.append(f"numbers {report.numbers_per_1k:.2f}/1k (min {MIN_NUMBERS_PER_1K})")
-    return report.model_copy(update={"failures": tuple(failures)})
+    else:
+        passing.append(f"numbers {report.numbers_per_1k:.2f}/1k (min {MIN_NUMBERS_PER_1K})")
+    return report.model_copy(
+        update={"failures": tuple(failures), "passing": tuple(passing)}
+    )

@@ -46,3 +46,18 @@ def test_repair_prompt_protects_beat_count_and_citations():
     out = build_repair_user_prompt("{}", ["mean sentence 30.0w (max 15.0)"])
     assert "same number of beats" in out.lower()
     assert "cite" in out
+
+
+def test_repair_prompt_states_the_passing_metrics_as_invariants():
+    """Run 20260803-111724 was refused because the repair fixed second person (8.0 -> 47.4) and
+    collapsed numbers/1k (14.8 -> 0.62) doing it. The prompt named only what to fix, so the
+    model had no reason to protect what already worked. It must carry both."""
+    out = build_repair_user_prompt(
+        '{"scenes": []}',
+        failures=["second person 7.95/1k after 90s (min 8.0)"],
+        passing=["numbers 14.80/1k (min 10.0)", "mean sentence 10.10w (max 15.0)"],
+    )
+    assert "numbers 14.80/1k (min 10.0)" in out
+    assert "mean sentence 10.10w (max 15.0)" in out
+    lowered = out.lower()
+    assert "already pass" in lowered or "must not" in lowered or "do not regress" in lowered

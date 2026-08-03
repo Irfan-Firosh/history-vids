@@ -81,3 +81,22 @@ def test_a_near_miss_failure_message_never_reads_as_passing():
     msg = next(f for f in report.failures if "second person" in f)
     shown = float(msg.split("second person ")[1].split("/")[0])
     assert shown < MIN_2P_AFTER_90S_PER_1K, f"failure message reads as passing: {msg!r}"
+
+
+def test_report_names_the_metrics_that_pass_not_only_the_ones_that_fail():
+    """Run 20260803-111724 was refused because its repair pass broke a metric that had been
+    passing: second person went 8.0 -> 47.4 (a 6x overshoot of the 8.0 minimum) while
+    numbers/1k collapsed 14.8 -> 0.62. The repair prompt named the failures to fix and said
+    nothing about preserving what already worked, so the model optimised one dimension and
+    displaced the concrete facts doing it. A repair needs the invariants, not just the targets.
+    """
+    passing_script = [
+        "Why did they go? You would have gone too. In 1908 a team found 40 hearths, each one "
+        "still ringed with stones you could count." for _ in range(16)
+    ]
+    report = score_script(passing_script)
+    assert report.ok
+    assert report.passing, "a fully passing script must report its passing metrics"
+    joined = " ".join(report.passing)
+    assert "numbers" in joined
+    assert "second person" in joined

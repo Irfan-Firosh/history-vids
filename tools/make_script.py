@@ -243,7 +243,9 @@ class LLMScriptProvider:
         if report.ok:
             return data
         log(f"rubric: draft failed ({len(report.failures)} issues) — one repair pass")
-        user = build_repair_user_prompt(json.dumps(data, ensure_ascii=False), report.failures)
+        user = build_repair_user_prompt(
+            json.dumps(data, ensure_ascii=False), report.failures, report.passing
+        )
         self.repair_ran = True
         try:
             repaired = llm.parse_json_block(self._chat(SCRIPT_SYSTEM_PROMPT, user))

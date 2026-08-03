@@ -194,7 +194,9 @@ def build_script_user_prompt(
     )
 
 
-def build_repair_user_prompt(draft_json: str, failures: Sequence[str]) -> str:
+def build_repair_user_prompt(
+    draft_json: str, failures: Sequence[str], passing: Sequence[str] = ()
+) -> str:
     """Ask for one revision of a draft that failed the craft rubric.
 
     The rubric's failure strings already name the metric, the observed value and the threshold
@@ -203,10 +205,12 @@ def build_repair_user_prompt(draft_json: str, failures: Sequence[str]) -> str:
     count) and the `cite` indices (the grounding gate already passed on them).
     """
     bullets = "\n".join(f"  - {f}" for f in failures)
+    keep = "\n".join(f"  - {p}" for p in passing) or "  (none measured)"
     return (
         "The script below was REJECTED by the craft rubric. Rewrite it so it passes, changing "
         "only what the failures demand.\n\n"
-        f"MEASURED FAILURES:\n{bullets}\n\n"
+        f"MEASURED FAILURES — fix these:\n{bullets}\n\n"
+        f"ALREADY PASSING — these must NOT regress:\n{keep}\n\n"
         "RULES FOR THE REVISION:\n"
         "  - Keep the SAME NUMBER OF BEATS, in the same order, on the same facts.\n"
         "  - Keep every beat's `cite` list exactly as it is — those indices are already verified.\n"
@@ -216,7 +220,12 @@ def build_repair_user_prompt(draft_json: str, failures: Sequence[str]) -> str:
         "target, break long sentences apart and add genuinely short ones; do not pad.\n"
         "  - If a failure says the hook never asks anything, put a real question mark in the "
         "FIRST beat's opening sentences.\n"
-        "  - If a failure names a word count, hit it — do not shorten the script to fix rhythm.\n\n"
+        "  - If a failure names a word count, hit it — do not shorten the script to fix rhythm.\n"
+        "  - Do NOT overshoot a failing metric. Clearing a minimum by a wide margin means you\n"
+        "    displaced something else — a revision that fixes one metric by breaking a passing\n"
+        "    one is a FAILED revision. Aim just past each threshold, not far past it.\n"
+        "  - Concrete numbers, dates and names are the easiest thing to lose while rewriting\n"
+        "    for rhythm or second person. Keep every one the draft already had.\n\n"
         f"REJECTED DRAFT:\n{draft_json}\n\n"
         "Return the corrected script as the same strict JSON object, no prose, no markdown fences."
     )
