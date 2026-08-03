@@ -48,7 +48,6 @@ from studio import (  # noqa: E402
     gemini,
     huggingface,
     image_timeline,
-    scene_filter,
     shot_uses_character,
     storyboard_from_dict,
     styled_prompt,
@@ -574,32 +573,6 @@ def _clean_caption(text: str) -> str:
     return folded.translate(_CAPTION_SUBST)
 
 
-def make_caption_png(text: str, out: Path) -> None:
-    """Render a full-frame transparent caption PNG (this ffmpeg lacks drawtext/libass, so we
-    overlay a PNG — the same pattern the repo's caption renderer uses)."""
-    from PIL import Image, ImageDraw, ImageFont
-
-    text = _clean_caption(text)
-    im = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    d = ImageDraw.Draw(im)
-    ff = _fontfile()
-    font = ImageFont.truetype(ff, 46) if ff else ImageFont.load_default()
-    lines = textwrap.wrap(text, width=46)
-    line_h = 60
-    block_h = line_h * len(lines)
-    top = H - block_h - 110
-    maxw = max((d.textlength(ln, font=font) for ln in lines), default=0)
-    pad = 32
-    d.rectangle([(W - maxw) / 2 - pad, top - pad, (W + maxw) / 2 + pad, top + block_h + pad - 12],
-                fill=(0, 0, 0, 150))
-    y = top
-    for ln in lines:
-        w = d.textlength(ln, font=font)
-        d.text(((W - w) / 2, y), ln, font=font, fill=(255, 255, 255, 255))
-        y += line_h
-    im.save(out)
-
-
 #: The callout box, as fractions of the frame: a wide, short band the text word-wraps inside.
 _CALLOUT_BOX_WF, _CALLOUT_BOX_HF = 0.42, 0.16
 #: Search bounds (frame fractions): stay out of the bottom subtitle band and off the very edges.
@@ -758,65 +731,6 @@ def make_emphasis_png(text: str, out: Path, base_image: Path | None = None) -> N
                stroke_width=4, stroke_fill=(255, 255, 255, 235))
         top += line_h
     im.save(out)
-
-
-def render_video(
-    segments: list[tuple[Path, float, float]],
-    wav: Path,
-    cues: list[tuple[str, float, float]],
-    out: Path,
-    overlays: list[tuple[str, float, float, Path]] | None = None,
-) -> None:
-    """Assemble the WHOLE video in one pass: `segments` are (image, start, end) global spans, hard-cut
-    in order across one continuous narration `wav`, with timed caption `cues` (text, start, end)
-    overlaid at the bottom. `overlays` are optional key-fact callouts (text, start, end, base_image)
-    placed on the frame's whitespace via `make_emphasis_png`.
-
-    RETIRED from the main render path: `render_storyboard`/`_assemble_video` now use the segment-
-    wise `tools.render.segments.render_segment` + `tools.render.assemble.assemble` instead (one
-    chained `overlay` filter node per caption cue does not scale — measured ~12.8h for an 8-minute
-    video's worth of cues). Kept only because `tools/reassemble.py` still calls it; migrate that
-    caller onto the same new path, then this function and its two PNG-overlay helpers
-    (`make_caption_png`, `make_emphasis_png`) can be deleted for good."""
-    overlays = overlays or []
-    vf = scene_filter("static", W, H, 1.0, FPS)  # static → scale/crop only; duration irrelevant
-    n = len(segments)
-    inputs: list[str] = []
-    for path, start, end in segments:
-        inputs += ["-loop", "1", "-t", f"{end - start:.3f}", "-i", str(path)]
-    inputs += ["-i", str(wav)]
-    audio_idx = n
-    # Both layers use the same timed full-frame PNG-overlay mechanism → build every overlay PNG once.
-    overlay_pngs: list[tuple[Path, float, float]] = []  # (png, start, end) in composite order
-    for k, (text, start, end) in enumerate(cues):
-        cap = out.with_name(f"{out.stem}_cap_{k}.png")
-        make_caption_png(text, cap)
-        overlay_pngs.append((cap, start, end))
-    for k, (text, start, end, base) in enumerate(overlays):
-        ep = out.with_name(f"{out.stem}_emph_{k}.png")
-        make_emphasis_png(text, ep, base)
-        overlay_pngs.append((ep, start, end))
-    for png, _, _ in overlay_pngs:
-        inputs += ["-i", str(png)]
-
-    chain = ";".join(f"[{j}:v]{vf}[s{j}]" for j in range(n))
-    chain += ";" + "".join(f"[s{j}]" for j in range(n)) + f"concat=n={n}:v=1:a=0[base]"
-    prev = "base"
-    for k, (_, start, end) in enumerate(overlay_pngs):
-        chain += (
-            f";[{prev}][{audio_idx + 1 + k}:v]"
-            f"overlay=0:0:enable='between(t,{start},{end})'[v{k}]"
-        )
-        prev = f"v{k}"
-
-    _run([
-        "ffmpeg", "-y", *inputs, "-filter_complex", chain,
-        "-map", f"[{prev}]", "-map", f"{audio_idx}:a",
-        "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-r", str(FPS),
-        "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-shortest", str(out),
-    ])
-    for png, _, _ in overlay_pngs:  # tidy the temp overlay PNGs (captions + callouts)
-        Path(png).unlink(missing_ok=True)
 
 
 def concat_audio(wavs: list[Path], out: Path) -> None:
@@ -1074,9 +988,9 @@ def _assemble_video(
     the continuous narration, and burn timed captions in one libass pass
     (`tools.render.assemble.assemble`), then mark the run complete.
 
-    Replaces the old single-filtergraph path (`render_video`, still kept around only because
-    `tools/reassemble.py` has not yet been migrated onto this path — see that module) that chained
-    one `overlay` node per caption cue and could not scale past a couple hundred cues.
+    Replaces the old single-filtergraph path (`render_video`, deleted — `tools/reassemble.py` was
+    the last caller and has since been migrated onto this same path) that chained one `overlay`
+    node per caption cue and could not scale past a couple hundred cues.
 
     ``words``/``word_starts``/``word_ends`` are the real Cartesia per-word timings (empty for the
     ``say`` voice) — passed through so captions word-anchor instead of drifting proportionally.

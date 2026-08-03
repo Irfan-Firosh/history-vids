@@ -9,7 +9,15 @@ The pacing rework (issues the user raised on run 20260701-095928):
   3. Image + caption cuts are driven by REAL spoken word times (pause-snapped beat alignment), so
      subtitles and picture switches land on the actual narration.
 
-Reuses the images already on disk (`img_{i}.png`, `img_{i}_cut{k}.png`); only the audio is new.
+Reuses the images already on disk (`img_{i}.png`, `img_{i}_{k}.png`); only the audio is new.
+
+Rendering goes through the same segment-cache + single-libass-pass path as the main pipeline
+(`tools.studio_poc._assemble_video`): each on-screen still is rendered once to a cached mp4
+(`tools.render.assemble.render_shots`) and the whole thing is concatenated + captioned in one
+`tools.render.assemble.assemble` call. This replaced the old `render_video`, which built one
+FFmpeg filtergraph with a serially chained `overlay` node per caption cue — measured ~12.8h for an
+8-minute video (see `tools/render/assemble.py`'s module docstring) — `render_video` has been
+deleted; nothing else called it.
 
 Run:
   python tools/reassemble.py \
@@ -30,19 +38,20 @@ sys.path.insert(0, str(_ROOT))
 from dotenv import load_dotenv  # noqa: E402
 
 from studio import (  # noqa: E402
+    Shot,
     align_beats_to_words,
     build_transcript,
     caption_timeline,
-    emphasis_timeline,
     image_timeline,
     storyboard_from_dict,
 )
+from tools.render.assemble import assemble, render_shots  # noqa: E402
 from tools.studio_poc import (  # noqa: E402
+    FPS,
     CartesiaTimestampVoice,
     H,
     W,
     ffprobe_duration,
-    render_video,
 )
 
 
@@ -53,6 +62,28 @@ def count_frames(images_dir: Path, index: int) -> int:
     while (images_dir / f"img_{index}_{k}.png").is_file():
         k += 1
     return k
+
+
+def _shots_from_disk(
+    beat_spans: list[tuple[float, float]], frames_per_beat: list[int], shot_types: list[str],
+) -> list[Shot]:
+    """The on-screen Shot schedule, driven by frames actually rendered on disk (`frames_per_beat`,
+    from `count_frames`) rather than a fresh-render count — reassemble reuses existing images only,
+    it never generates new ones. Reuses `image_timeline`'s exact (name, start, end) segmentation
+    (same forward-only, no-cut-back schedule the main pipeline uses) and rebuilds it as `Shot`
+    objects so it can be handed to `render_shots`."""
+    segments = image_timeline(beat_spans, frames_per_beat)
+    shots: list[Shot] = []
+    idx = 0
+    for i, n in enumerate(frames_per_beat):
+        for k in range(n):
+            name, start, end = segments[idx]
+            idx += 1
+            shots.append(Shot(
+                beat_index=i, sub_index=k, start=start, end=end,
+                image_key=name, shot_type=shot_types[i],
+            ))
+    return shots
 
 
 def reassemble(storyboard_path: Path, images_dir: Path, out: Path) -> Path:
@@ -68,22 +99,19 @@ def reassemble(storyboard_path: Path, images_dir: Path, out: Path) -> Path:
 
     beat_spans = align_beats_to_words(narrations, words, starts, ends)
     frames_per_beat = [count_frames(images_dir, i) for i in range(len(sb.scenes))]
-    segments = image_timeline(beat_spans, frames_per_beat)
-    cues = caption_timeline(beat_spans, narrations)
-    overlays = [
-        (text, start, end, images_dir / f"img_{bi}.png")
-        for text, bi, start, end in emphasis_timeline(
-            beat_spans, [s.emphasis for s in sb.scenes], narrations
-        )
-    ]
+    shots = _shots_from_disk(beat_spans, frames_per_beat, [s.shot_type for s in sb.scenes])
+    cues = caption_timeline(beat_spans, narrations, words=words, word_starts=starts, word_ends=ends)
 
-    print(f"  {len(sb.scenes)} beats → {len(segments)} image cuts, {len(cues)} caption cues, "
-          f"{len(overlays)} callouts")
+    print(f"  {len(sb.scenes)} beats → {len(shots)} image cuts, {len(cues)} caption cues")
     for i, ((start, end), c) in enumerate(zip(beat_spans, frames_per_beat, strict=False)):
         print(f"   beat {i:2}: {start:6.2f}–{end:6.2f}s ({end - start:4.1f}s, {c} frame(s))")
 
-    resolved = [(images_dir / name, start, end) for name, start, end in segments]
-    render_video(resolved, wav, cues, out, overlays=overlays)
+    segments = render_shots(
+        shots, images_dir, out.parent / "segments", width=W, height=H, fps=FPS,
+    )
+    assemble(
+        segments, wav, cues, out, work_dir=out.parent / "assemble_work", width=W, height=H, fps=FPS,
+    )
     dur = ffprobe_duration(out)
     print(f"\n✅ {out}  ({dur:.1f}s, {W}x{H}) — reused {images_dir.name} images, new audio")
     return out
