@@ -206,9 +206,9 @@ def test_rerun_inherits_captions_off_from_manifest_settings(client, monkeypatch)
     assert "--no-captions" in captured["cmd"]
 
 
-def test_rerun_defaults_captions_on_when_settings_absent(client, monkeypatch):
+def test_rerun_defaults_captions_off_when_settings_absent(client, monkeypatch):
     """An old manifest recorded before this change has no `settings` key at all — the re-run must
-    still work and fall back to captions=True rather than crashing or silently disabling them."""
+    still work and fall back to the current default, captions OFF, rather than crashing."""
     captured: dict = {}
 
     class FakeProc:
@@ -222,7 +222,7 @@ def test_rerun_defaults_captions_on_when_settings_absent(client, monkeypatch):
     monkeypatch.setattr(dash.subprocess, "Popen", fake_popen)
     r = client.post("/api/runs/20260101-000000/rerun")
     assert r.status_code == 201
-    assert "--no-captions" not in captured["cmd"]
+    assert "--no-captions" in captured["cmd"]
 
 
 # ── review gate (HITL: pause after images → approve to assemble / regenerate one image) ──

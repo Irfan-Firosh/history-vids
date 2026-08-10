@@ -76,7 +76,7 @@ class RunRequest(BaseModel):
     char_model: ImageModel | None = None
     concept_model: ImageModel | None = None
     voice: Literal["say", "cartesia"] = "say"
-    captions: bool = True
+    captions: bool = False
     min_minutes: float = 6.0  # target duration band (topic runs only)
     max_minutes: float = 9.0
     # Human-in-the-loop: pause after images so the user can review/regenerate before assembly.
@@ -100,7 +100,7 @@ class ResumeRequest(BaseModel):
 class ApproveRequest(BaseModel):
     """Approve payload — assemble the reviewed images into the final video."""
 
-    captions: bool = True
+    captions: bool = False
 
 
 class RegenerateRequest(BaseModel):
@@ -443,7 +443,7 @@ def rerun_run(run_id: str) -> dict[str, str]:
     kwargs: dict[str, object] = {
         "topic": manifest.get("topic") or None,
         "voice": voice,
-        "captions": bool(settings.get("captions", True)),
+        "captions": bool(settings.get("captions", False)),
     }
     if "/" in provider:  # per-role "char/concept" → separate model flags
         char, concept = (provider.split("/") + [provider])[:2]
@@ -508,7 +508,7 @@ def resume_run(run_id: str, req: ResumeRequest) -> dict[str, object]:
     settings = manifest.get("settings") or {}
     # An explicit choice on the resume request wins; otherwise recover the original run's choice
     # (defaulting to True for runs recorded before `settings` existed).
-    captions = req.captions if req.captions is not None else bool(settings.get("captions", True))
+    captions = req.captions if req.captions is not None else bool(settings.get("captions", False))
 
     with _lock:
         proc = _active["proc"]

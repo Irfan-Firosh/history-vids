@@ -57,6 +57,7 @@ from studio import (  # noqa: E402
 )
 from studio.run_log import RunSettings, RunStats  # noqa: E402
 from studio.style import LOCKED_STYLE, PALETTE  # noqa: E402
+from studio.voices import resolve_voice  # noqa: E402
 from tools.render.assemble import assemble  # noqa: E402
 from tools.render.ffmpeg import subtitle_backend  # noqa: E402
 from tools.render.segments import render_segment  # noqa: E402
@@ -456,8 +457,16 @@ class SayVoiceProvider:
         return ffprobe_duration(out_path)
 
 
+def _cartesia_voice() -> str:
+    """The narrator id for this run: `CARTESIA_VOICE_ID` > `CARTESIA_VOICE` name > the default.
+
+    The env reads live here rather than in `studio.voices` so that module stays pure.
+    """
+    return resolve_voice(os.environ.get("CARTESIA_VOICE_ID"), os.environ.get("CARTESIA_VOICE"))
+
+
 class CartesiaVoiceProvider:
-    """Real Cartesia TTS (Sonic). Needs CARTESIA_API_KEY (set) + CARTESIA_VOICE_ID (Carson)."""
+    """Real Cartesia TTS (Sonic). Needs CARTESIA_API_KEY; voice picked by `_cartesia_voice`."""
 
     name = "cartesia"
 
@@ -465,11 +474,9 @@ class CartesiaVoiceProvider:
         import httpx
 
         key = os.environ.get("CARTESIA_API_KEY")
-        voice = os.environ.get("CARTESIA_VOICE_ID")
-        if not key or not voice:
-            raise RuntimeError(
-                "Set CARTESIA_API_KEY (present) and CARTESIA_VOICE_ID=<Carson's id> in .env to use Cartesia."
-            )
+        if not key:
+            raise RuntimeError("Set CARTESIA_API_KEY in .env to use Cartesia.")
+        voice = _cartesia_voice()
         model = os.environ.get("CARTESIA_TTS_MODEL", "sonic-2")
         resp = httpx.post(
             "https://api.cartesia.ai/tts/bytes",
@@ -503,9 +510,9 @@ class CartesiaTimestampVoice:
         import httpx
 
         key = os.environ.get("CARTESIA_API_KEY")
-        voice = os.environ.get("CARTESIA_VOICE_ID")
-        if not key or not voice:
-            raise RuntimeError("Set CARTESIA_API_KEY and CARTESIA_VOICE_ID (Carson) in .env.")
+        if not key:
+            raise RuntimeError("Set CARTESIA_API_KEY in .env to use Cartesia.")
+        voice = _cartesia_voice()
         model = os.environ.get("CARTESIA_SSE_MODEL", "sonic-2")
         speed = max(0.6, min(1.5, float(os.environ.get("CARTESIA_SPEED", "0.88"))))
         body = {
@@ -1149,7 +1156,7 @@ def _assemble_video(
     return out
 
 
-def assemble_storyboard(rec: RunRecorder, sb, captions: bool = True) -> Path:
+def assemble_storyboard(rec: RunRecorder, sb, captions: bool = False) -> Path:
     """Assemble the final video from the narration + frames ALREADY on disk — the "approve" step of
     the human-in-the-loop review gate. Reconstructs the exact timeline ``render_storyboard`` would
     have used (same spans, frame counts, callouts) so the result is identical to an un-paused run."""
@@ -1260,7 +1267,7 @@ def generate_thumbnail(
 
 
 def render_storyboard(
-    rec: RunRecorder, sb, images: ImageProviders, voice, captions: bool = True,
+    rec: RunRecorder, sb, images: ImageProviders, voice, captions: bool = False,
     resume: bool = False, fallback=None, pause_for_review: bool = False,
     skip_style_check: bool = False,
 ) -> Path | None:
@@ -1428,7 +1435,11 @@ def main() -> None:
     ap.add_argument("--concept-model", choices=list(IMAGE_PROVIDER_NAMES))
     ap.add_argument("--voice", choices=["say", "cartesia"], default="say")
     ap.add_argument("--storyboard", help="path to a generated storyboard.json (else the canned demo)")
-    ap.add_argument("--no-captions", action="store_true")
+    # Captions are OFF by default. Two reasons, both measured: the reference channel burns none,
+    # and the caption path is the ONLY thing that forces a second lossy encode of every frame
+    # (`assemble` stream-copies when there are no cues). `--captions` opts back in.
+    ap.add_argument("--captions", action=argparse.BooleanOptionalAction, default=False,
+                    help="burn narration subtitles into the video (default: off)")
     ap.add_argument("--run-id", help="pre-assigned run id (the dashboard passes this to locate the run dir)")
     ap.add_argument("--out", help="optional extra copy of the final mp4 (always written into the run dir)")
     ap.add_argument("--resume", action="store_true", help="reuse frames already on disk for this run-id")
@@ -1476,7 +1487,7 @@ def main() -> None:
             ap.error("--assemble-only / --regenerate / --thumbnail require --run-id")
         rec = RunRecorder.load(RUNS_DIR, args.run_id)
         if args.assemble_only:
-            assemble_storyboard(rec, sb, captions=not args.no_captions)
+            assemble_storyboard(rec, sb, captions=args.captions)
         elif args.thumbnail:
             generate_thumbnail(rec, sb, images.character, text=args.thumb_text,
                                subject=args.thumb_subject)
@@ -1499,7 +1510,7 @@ def main() -> None:
     # `_spawn_run`, which pre-writes the same settings before this subprocess starts — without this
     # call, this RunRecorder.create() above would silently reset them back to defaults).
     rec.set_settings(RunSettings(
-        captions=not args.no_captions, images_provider=images_label, voice=voice.name,
+        captions=args.captions, images_provider=images_label, voice=voice.name,
     ))
     print(f"Storyboard: {sb.title!r} · {len(sb.scenes)} scenes · images={images_label} · voice={voice.name}")
     print(f"Run: {rec.run_id}  →  {rec.dir}")
@@ -1508,7 +1519,7 @@ def main() -> None:
 
     fallback = make_image_provider(args.fallback) if args.fallback else None
     out = render_storyboard(
-        rec, sb, images, voice, captions=not args.no_captions,
+        rec, sb, images, voice, captions=args.captions,
         resume=args.resume, fallback=fallback, pause_for_review=args.review,
         skip_style_check=args.skip_style_check,
     )
