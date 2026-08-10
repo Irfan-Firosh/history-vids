@@ -76,6 +76,11 @@ OVERLAY_LANGUAGE = (
 #: pairwise layout similarity was 0.879. Framing is now chosen per shot by
 #: ``studio.framing.plan_framings`` and injected here, so variety is structural rather than a thing
 #: the prompt politely requests.
+#:
+#: These names are deliberately DISJOINT from ``studio.types.SHOT_TYPES``. When framing offered
+#: a "wide" and shot_type also offered a "wide", the script LLM began writing framing values
+#: into shot_type and a real run died on ``shot_type: "detail"``. Two overlapping vocabularies
+#: in one JSON object is an invitation to cross them.
 FRAMINGS: dict[str, str] = {
     "close_up": (
         "EXTREME CLOSE-UP: one head, one pair of hands, or one object fills most of the frame and "
@@ -85,7 +90,7 @@ FRAMINGS: dict[str, str] = {
         "MEDIUM SHOT: one or two figures seen from roughly the waist up, close enough to read the "
         "expression, cropped by the bottom edge"
     ),
-    "wide": (
+    "establishing": (
         "WIDE ESTABLISHING SHOT: small figures placed low in the frame, the environment filling "
         "most of the height"
     ),

@@ -11,7 +11,7 @@ import sys
 
 from studio.research import strip_citation_markers
 from studio.style import LOCKED_STYLE
-from studio.types import Scene, Storyboard
+from studio.types import SHOT_TYPES, Scene, Storyboard
 
 _BEATS = [
     # (narration, image_prompt, shot_type, emphasis). Locked style appended at render; shot_type
@@ -64,6 +64,40 @@ DEMO_STORYBOARD = Storyboard(
 )
 
 
+#: Framing names the script LLM sometimes puts in ``shot_type`` by mistake, mapped to the shot type
+#: each one implies. The two fields are different axes -- ``shot_type`` decides whether people may
+#: appear, ``framing`` decides where the camera is -- but both answer "what kind of shot is this?",
+#: and a model asked for both inside one object will occasionally cross them. A real run died on
+#: ``shot_type: "detail"`` after paying for research, a script, a repair pass and a callout pass.
+_FRAMING_AS_SHOT_TYPE: dict[str, str] = {
+    "close_up": "character",
+    "medium": "character",
+    "over_shoulder": "character",
+    "profile": "character",
+    "establishing": "wide",
+    "detail": "concept",
+    "cutaway": "concept",
+}
+
+
+def _shot_type_and_framing(raw_shot: object, raw_framing: object) -> tuple[str, str]:
+    """Normalise the two shot fields together, recovering when the model crosses them.
+
+    Never raises. ``shot_type`` feeds a pydantic ``Literal`` and was the ONLY field here that could
+    abort a run on one bad token -- every other field already degraded to a safe default. A
+    storyboard is model output; one stray word must not cost the paid passes that produced it.
+    """
+    shot = str(raw_shot or "").strip().lower()
+    framing = str(raw_framing or "").strip().lower()
+    if shot in SHOT_TYPES:
+        return shot, framing
+    if shot in _FRAMING_AS_SHOT_TYPE:
+        # A framing landed in shot_type. Take the shot type it implies, and keep the word as the
+        # framing when that slot is empty -- the model told us something, just in the wrong box.
+        return _FRAMING_AS_SHOT_TYPE[shot], framing or shot
+    return "character", framing
+
+
 def storyboard_from_dict(data: dict, default_style: str = LOCKED_STYLE) -> Storyboard:
     """Build a validated `Storyboard` from an LLM's JSON (see `studio.llm.parse_json_block`).
 
@@ -93,14 +127,15 @@ def storyboard_from_dict(data: dict, default_style: str = LOCKED_STYLE) -> Story
             dropped += 1
             continue
         cites = tuple(s.get("cite") or ())
+        shot_type, framing = _shot_type_and_framing(s.get("shot_type"), s.get("framing"))
         scenes.append(
             Scene(
                 narration=narration,
                 image_prompt=image_prompt,
-                shot_type=s.get("shot_type") or "character",
+                shot_type=shot_type,
                 # A request, not a decision: studio.framing.plan_framings validates it against the
                 # shot type and overrules it when it would extend a monotonous run.
-                framing=(s.get("framing") or "").strip().lower(),
+                framing=framing,
                 cite=cites + tuple(n for n in inline_cites if n not in cites),
                 emphasis=(s.get("emphasis") or "").strip(),
                 intense=bool(s.get("intense", False)),

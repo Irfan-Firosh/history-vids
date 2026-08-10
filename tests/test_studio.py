@@ -581,10 +581,36 @@ def test_storyboard_from_dict_defaults_shot_type_to_character():
     assert storyboard_from_dict(data).scenes[0].shot_type == "character"
 
 
-def test_storyboard_from_dict_rejects_invalid_shot_type():
-    bad = {"narration": "n", "image_prompt": "p", "shot_type": "banana"}
-    with pytest.raises(ValidationError):
-        storyboard_from_dict({"title": "T", "scenes": [bad]})
+def test_an_unknown_shot_type_falls_back_instead_of_aborting_the_run():
+    """Changed 2026-08-09 from raising. shot_type was the only field here that could kill a run on
+    one bad token, and it did: a real run died on `shot_type: "detail"` AFTER paying for research,
+    a script, a repair pass and a callout pass, and nothing reached disk. A storyboard is model
+    output; every other field already degraded to a safe default."""
+    sb = storyboard_from_dict({"title": "T", "scenes": [
+        {"narration": "n", "image_prompt": "p", "shot_type": "banana"},
+    ]})
+    assert sb.scenes[0].shot_type == "character"
+
+
+def test_a_framing_written_into_shot_type_is_recovered_into_both_fields():
+    """The exact shape of the crash: the model crossed the two fields. `detail` means a single
+    object with no people, so the shot type is concept -- and the word is kept as the framing
+    rather than thrown away, because the model did tell us something."""
+    sb = storyboard_from_dict({"title": "T", "scenes": [
+        {"narration": "n", "image_prompt": "p", "shot_type": "detail"},
+        {"narration": "n", "image_prompt": "p", "shot_type": "close_up"},
+        {"narration": "n", "image_prompt": "p", "shot_type": "cutaway", "framing": "profile"},
+    ]})
+    assert [s.shot_type for s in sb.scenes] == ["concept", "character", "concept"]
+    # The third already had a framing of its own, so that one wins.
+    assert [s.framing for s in sb.scenes] == ["detail", "close_up", "profile"]
+
+
+def test_a_valid_shot_type_is_untouched():
+    sb = storyboard_from_dict({"title": "T", "scenes": [
+        {"narration": "n", "image_prompt": "p", "shot_type": " Map "},
+    ]})
+    assert sb.scenes[0].shot_type == "map"
 
 
 def test_storyboard_from_dict_requires_scenes():

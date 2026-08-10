@@ -15,6 +15,8 @@ import json
 import os
 import re
 import sys
+import tempfile
+import time
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -39,6 +41,7 @@ from studio.script_prompt import (  # noqa: E402
     build_repair_user_prompt,
     build_script_user_prompt,
 )
+from studio.types import Storyboard  # noqa: E402
 
 OUT_DIR = _ROOT / "result/axen/scripts"
 EXA_SEARCH_URL = "https://api.exa.ai/search"
@@ -225,8 +228,33 @@ class LLMScriptProvider:
         _strip_inline_citations(data)
         data = self._repair_if_needed(data, log=log)
         self._apply_callout_analysis(data)  # a focused 2nd pass: pick callouts + flag intense beats
-        storyboard = storyboard_from_dict(data)
+        storyboard = self._validate_or_rescue(data)
         return storyboard, sources, data
+
+    @staticmethod
+    def _validate_or_rescue(data: dict) -> Storyboard:
+        """Build the Storyboard, and if that fails, get the paid script onto disk before raising.
+
+        By this point the run has paid for research, a script, possibly a repair pass and a callout
+        pass, and NOTHING has been written yet — `build_and_save` writes storyboard.json only after
+        this returns. A validation error here used to destroy all of it. `storyboard_from_dict` is
+        now defensive about field-level junk, so this is the backstop for whatever it cannot
+        absorb: the JSON is dumped somewhere durable and the error names the file.
+        """
+        try:
+            return storyboard_from_dict(data)
+        except Exception as exc:
+            rescue = Path(tempfile.gettempdir()) / f"storyboard-rescue-{int(time.time())}.json"
+            try:
+                rescue.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+            except Exception:  # noqa: BLE001 — the original error matters more than this one
+                raise exc from None
+            raise RuntimeError(
+                f"{exc}\n\nThe generated script was NOT lost — it is at:\n  {rescue}\n"
+                f"Fix the beat by hand and render it without re-paying:\n"
+                f"  uv run python tools/studio_poc.py --storyboard {rescue} "
+                f"--images agnes --voice cartesia"
+            ) from exc
 
     def _repair_if_needed(self, data: dict, log) -> dict:
         """One revision pass when a draft fails the craft rubric. Returns the data to use.

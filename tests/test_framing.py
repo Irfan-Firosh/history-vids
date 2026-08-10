@@ -16,6 +16,15 @@ def _longest_run(seq):
     return best
 
 
+def test_framing_names_never_collide_with_shot_type_names():
+    """A real run died on `shot_type: "detail"`. Both fields answer "what kind of shot is this?",
+    and when framing also offered a "wide" the script LLM started writing framing values into
+    shot_type. Two overlapping vocabularies in one JSON object invite exactly that."""
+    from studio.types import SHOT_TYPES
+
+    assert not set(FRAMINGS) & set(SHOT_TYPES)
+
+
 def test_every_framing_name_has_a_directive():
     for shot_type in ("character", "wide", "concept", "map"):
         for name in legal_framings(shot_type):
@@ -43,8 +52,8 @@ def test_concept_and_map_never_get_a_framing_that_requires_a_person():
 
 
 def test_a_legal_request_is_honoured():
-    out = plan_framings(["character", "character"], ["cutaway", "wide"])
-    assert out == ["cutaway", "wide"]
+    out = plan_framings(["character", "character"], ["cutaway", "establishing"])
+    assert out == ["cutaway", "establishing"]
 
 
 def test_an_illegal_request_is_replaced_not_raised():

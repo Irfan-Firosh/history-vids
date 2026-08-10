@@ -33,8 +33,9 @@ _NEEDS_PERSON = frozenset({"close_up", "medium", "over_shoulder", "profile"})
 
 #: Preference order within each shot family. First entry is the natural default for that family;
 #: the rest are the variety pool, ordered so consecutive picks look different from each other.
-_CHARACTER_ORDER = ("medium", "profile", "close_up", "wide", "over_shoulder", "cutaway")
-_CONCEPT_ORDER = ("detail", "wide", "cutaway")
+_CHARACTER_ORDER = ("medium", "profile", "close_up", "establishing", "over_shoulder",
+                    "cutaway")
+_CONCEPT_ORDER = ("detail", "establishing", "cutaway")
 
 
 def legal_framings(shot_type: str) -> tuple[str, ...]:

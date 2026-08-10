@@ -386,3 +386,38 @@ the picture.
 **Residual, unfixed after four probe rounds:** Agnes still adds background crowds to a subject that
 says "stands alone". Prompt text has hit diminishing returns here; the next lever is a
 post-generation check or reference conditioning, not more words.
+
+---
+
+## 2026-08-09 — Two overlapping vocabularies in one JSON object will get crossed
+
+**What happened.** I added a `framing` field beside the existing `shot_type` field in the script
+LLM's output schema. `shot_type` takes `character | wide | concept | map`; my `framing` took
+`close_up | medium | wide | detail | cutaway | over_shoulder | profile`. **Both lists contained
+`wide`.** The very next real run emitted `shot_type: "detail"` and died on a pydantic `Literal`.
+
+Two independent defects, and the second was much worse than the first:
+
+1. **The vocabularies overlapped.** Both fields answer "what kind of shot is this?", they sit
+   adjacent in the same JSON object, and they shared a token. That is an invitation to cross them.
+   Renamed the framing to `establishing` so the two sets are provably disjoint — there is now a
+   test asserting `set(FRAMINGS) & set(SHOT_TYPES)` is empty.
+
+2. **`shot_type` was the only field in `storyboard_from_dict` that could abort a run.** Every
+   other field already degraded to a safe default; that one went straight into a `Literal`. So one
+   stray token destroyed research, a script, a repair pass and a callout pass — and `storyboard.json`
+   is written AFTER `generate()` returns, so nothing reached disk.
+
+**Rules.**
+- When adding a field to a model's output schema, check its value set against every neighbouring
+  field's. Disjoint or it will be crossed. Assert it in a test.
+- **Every field parsed from model output degrades; none of them raise.** If a field feeds a
+  `Literal` or an enum, coerce it at the boundary. Recover what you can — a framing found in
+  `shot_type` still tells you the framing.
+- **Persist the expensive artifact before the code that can reject it.** Anything downstream of a
+  paid call must not be able to lose it. `_validate_or_rescue` now dumps the JSON and names the
+  file in the error, so the worst case is a hand-edit rather than paying again.
+
+**Related:** [[2026-08-09 — An enumeration in an image prompt is read as a checklist]]. Same root
+cause one layer up: I keep adding vocabulary to prompts without checking how the model will read it
+against everything else already there.
