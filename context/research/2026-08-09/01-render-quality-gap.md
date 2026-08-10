@@ -17,12 +17,40 @@ The renderer is not the problem. It faithfully displays weak images, and the ima
 because `studio/style.py::LOCKED_STYLE` mandates the weakness. Seven of the reference's defining
 devices are things our prompt explicitly forbids.
 
-## 1. Shot rate: 4.5x too slow
+## 1. Shot rate: ~2x too slow
 
-| | Reference | This run | Where ours comes from |
+**Corrected 2026-08-09.** The first version of this note said 4.5x, from a multimodal read that
+estimated ~1.6s per image. A deterministic measurement disagrees and supersedes it.
+
+`assets/refs/frame_*.jpg` is a contiguous frame sequence, so consecutive-frame mean absolute
+difference gives a cut count with no model in the loop. Using `tools/conformance.py:47`'s
+calibrated `HARD_CUT_THRESHOLD = 26.0`, over three separate 3,000-frame blocks:
+
+| block | cuts / 2,999 pairs | held | @24fps | @30fps |
+|---|---|---|---|---|
+| 1–3000 | 37 (1.2%) | 98.8% | 17.8 cuts/min, 3.38s | 22.2 cuts/min, 2.70s |
+| 7000–10000 | 32 (1.1%) | 98.8% | 15.4 cuts/min, 3.90s | 19.2 cuts/min, 3.12s |
+| 14000–17000 | 25 (0.8%) | 99.1% | 12.0 cuts/min, 5.00s | 15.0 cuts/min, 4.00s |
+
+So the reference sits at roughly **2.7–5.0s per shot**, not 1.6s.
+
+| | Reference (measured) | This run | Where ours comes from |
 |---|---|---|---|
-| seconds per image | ~1.6 | 7.21 | `studio/narration.py:31` `MIN_FRAME_HOLD = 8.0` |
-| image changes / min | ~37 | 8.3 | 60 images / 432.6s |
+| seconds per image | ~3.0–4.0 | 7.21 | `studio/narration.py:31` `MIN_FRAME_HOLD = 8.0` |
+| full cuts / min | ~15–22 | 8.3 | 60 images / 432.6s |
+| held frames | 98.8–99.1% | ~100% | static hard cuts, no motion |
+
+**Two consequences.**
+
+The `TARGETS` band in `tools/conformance.py:52` (`cuts_per_min` 16–18, `frozen_pct` 94.6–100) is
+consistent with this measurement, which is weak corroboration — both may derive from the same
+unverified corpus, so this does not establish provenance. But the earlier claim that the cut-rate
+target was incoherent is not supported: 15–22 measured against a 16–18 band is a good match.
+
+The multimodal read counted ~37 changes/min where hard cuts are ~15–22. The gap is most likely
+partial changes — an arrow appearing, an element sliding in — which a full-frame threshold does not
+see and which `conformance.py`'s own docstring flags as the FULL_CUT-vs-all-changes ambiguity.
+Those are two different quantities, and the reference plausibly does both.
 
 `tools/conformance.py:53` targets `median_shot_sec` of 0.9–4.6. `MIN_FRAME_HOLD = 8.0` is above
 the top of that band, so the pipeline is structurally incapable of passing its own gate.
@@ -104,7 +132,9 @@ out the device instead of moving it to a layer that can render text correctly.
 
 Ranked by effect per unit of work:
 
-1. Wire `plan_shots` into `studio_poc` — the module exists and is tested. 4.5x shot rate.
+1. Wire `plan_shots` into `studio_poc` — the module exists and is tested. `WORDS_PER_SHOT = 10` at
+   the measured 172 wpm gives **3.5s per shot**, landing inside the measured 2.7–5.0s reference
+   band. Costs roughly 2x the images per video (60 -> ~124 for this run's length).
 2. Rewrite `LOCKED_STYLE`'s composition clauses and make the storyboard emit a shot type per beat
    (close-up / profile / depth / cropped). Removes the lineup.
 3. Move on-screen numbers and arrows to a post pass that draws them deterministically, and lift
