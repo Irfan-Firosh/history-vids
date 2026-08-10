@@ -105,6 +105,44 @@ characteristic devices, and we ban them on every prompt path. They were banned b
 model garbles text — a real constraint — but the conclusion drawn from it (no text anywhere) threw
 out the device instead of moving it to a layer that can render text correctly.
 
+### 4b. Verified directly against the frame corpus (2026-08-09)
+
+The table above came from one multimodal read of one 90-second window. A 20-frame contact sheet
+sampled evenly across all 18,709 frames confirms it and adds three findings the read missed. All
+of this is observable in `assets/refs/` — no new media fetched, none committed.
+
+**Confirmed, with examples:**
+
+- **Burned-in labels.** `FAT/BLUBBER` with leader lines onto a seal; `HIBERNATION IDEA`,
+  `SICKNESS`, `SCAVENGERS` labelling a diagram; a `10:00` clock face. Text is a core device.
+- **Arrows everywhere.** Leader lines, curved flow arrows, and directional sets in nearly a third
+  of sampled frames.
+- **Red as emphasis.** Large red `?` marks over investigation scenes.
+- **1–3 figures**, never a five-across lineup.
+
+**New — three things neither the read nor this note had:**
+
+1. **Colour-coded semantic overlay.** Orange squiggles and arrows mean heat; blue arrows and lines
+   mean cold; yellow fill highlights the anatomical part under discussion. This is a systematic
+   visual language for abstract quantities, applied on top of the drawing. The pipeline has no
+   equivalent — `emphasis` renders a text callout and nothing else.
+2. **Cutaway and cross-section staging.** A pit house sliced open, a cave shown in section with
+   people inside, a barn with livestock in the layer below. A recurring way to show interiors.
+3. **Backgrounds are rich, varied and location-specific** — deep blue night snow, brown earth
+   strata, cave interiors, pine forest, ice shelf. `LOCKED_STYLE:22`'s "Plain pale background
+   (white, light grey, pale blue, or pale yellow)" is not a description of this reference; it is
+   the opposite of it. Scale ranges from one tiny figure alone on white to a face filling the
+   frame — our 60 frames have no such range (see §3).
+
+**One correction to our own style dogma.** `LOCKED_STYLE` requires that *every* human be a white
+round-headed stick person. The reference does not: it mixes plain white-headed stick figures with
+more fleshed characters that have hair, skin tone and drawn bodies. The rule is stricter than the
+thing it is imitating.
+
+**Provenance, partial.** These frames show winter and cold-survival subject matter, not the
+"all day" video. So the corpus is consistent with the Axen channel but is not the video compared
+in §1. Provenance is still not established from the code.
+
 ## 5. Render-path defects (small, real, already half-fixed)
 
 - **Double encode.** With caption cues, `tools/render/assemble.py:122` re-encodes every frame
@@ -130,13 +168,33 @@ out the device instead of moving it to a layer that can render text correctly.
 
 ## Implication
 
-Ranked by effect per unit of work:
+Ranked by effect per unit of work. The ordering changed once §4b was verified: the largest gap is
+not pacing, it is that `LOCKED_STYLE` bans or omits most of the reference's visual vocabulary.
 
-1. Wire `plan_shots` into `studio_poc` — the module exists and is tested. `WORDS_PER_SHOT = 10` at
-   the measured 172 wpm gives **3.5s per shot**, landing inside the measured 2.7–5.0s reference
-   band. Costs roughly 2x the images per video (60 -> ~124 for this run's length).
-2. Rewrite `LOCKED_STYLE`'s composition clauses and make the storyboard emit a shot type per beat
-   (close-up / profile / depth / cropped). Removes the lineup.
-3. Move on-screen numbers and arrows to a post pass that draws them deterministically, and lift
-   `NO_TEXT` for those specific elements only.
-4. `lanczos` + `cas` in `render_segment`, and bump `CACHE_VERSION`.
+1. **Rewrite `LOCKED_STYLE`.** Three clauses do the damage: "plain pale background", "mid-distance
+   view / lots of empty space / diagram-like composition", and the absolute `NO_TEXT`. Replace the
+   background rule with location-specific environments, the framing rule with an explicit per-beat
+   shot type (close-up / profile / depth / cutaway / wide), and narrow `NO_TEXT` to prose only.
+2. **Add the label-and-arrow layer.** Labels, leader lines and the orange-hot / blue-cold overlay
+   are the reference's signature and we render none of it. The existing PIL callout machinery
+   (`emphasis`, `emphasis_timeline`) is the right home — it already draws text deterministically,
+   which sidesteps the garbled-model-text problem that motivated `NO_TEXT`.
+3. **Wire `plan_shots` into `studio_poc`** — the module exists and is tested. `WORDS_PER_SHOT = 10`
+   at the measured 172 wpm gives **3.5s per shot**, inside the measured 2.7–5.0s band. Costs
+   roughly 2x the images per video (60 -> ~124 for this run's length).
+4. **Widen the image prompt.** 8 words carrying 2.5% of the prompt cannot specify a shot; the
+   storyboard LLM needs to emit framing, scale and staging per beat, not just a subject.
+5. `lanczos` + `cas` in `render_segment`, and bump `CACHE_VERSION`.
+
+## Confidence
+
+Measured locally, high confidence: §1 (shot rate), §2 (prompt ratio), §3 (composition similarity),
+§5 (encode and upscale), and the `plan_shots` wiring gap.
+
+Verified by direct inspection of frames on disk, high confidence: §4b.
+
+Single-source and still soft: the recurring pith-helmet "Explorer" character, and whether the
+reference's partial-change rate really is ~37/min. Neither is load-bearing for the ranking above.
+
+Unresolved: corpus provenance. Everything here describes `assets/refs/`, which is Axen-consistent
+but unverified from the code.
