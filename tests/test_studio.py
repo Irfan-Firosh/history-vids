@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import re
 
 import pytest
 from pydantic import ValidationError
@@ -42,7 +43,7 @@ from studio.script_prompt import (
     build_script_user_prompt,
 )
 from studio.storyboard import storyboard_from_dict
-from studio.style import LOCKED_STYLE, styled_prompt
+from studio.style import FIGURE_CAP, LOCKED_STYLE, styled_prompt
 from studio.types import Scene, Storyboard, shot_uses_character
 
 
@@ -60,13 +61,49 @@ def test_locked_style_scopes_stick_figures_to_humans_only():
 
 
 def test_locked_style_matches_the_new_explainer_spec():
-    # The current spec comes from assets/refs stills: crude marker-cartoon frames, white heads,
-    # wobbly black linework, flat colors, plain backgrounds, and simple diagram-like staging.
+    # Crude marker-cartoon frames, white round heads, wobbly black linework, flat colors.
     s = LOCKED_STYLE.lower()
-    for token in ("assets/refs", "marker", "wobbly", "white", "flat", "empty space"):
+    for token in ("marker", "wobbly", "white", "flat"):
         assert token in s, token
     for gone in ("cinematic lighting", "photorealistic", "professional"):
         assert gone not in s, gone
+
+
+def test_locked_style_no_longer_mandates_the_two_measured_failures():
+    """2026-08-09: the reference uses rich location backgrounds and never a front-facing lineup.
+
+    The old style mandated the opposite of both ("plain pale background", "lots of empty space",
+    "mid-distance view"), which is what produced 0.879 mean layout similarity across a 60-image
+    run. See context/research/2026-08-09/01-render-quality-gap.md.
+    """
+    s = LOCKED_STYLE.lower()
+    for gone in ("plain pale background", "lots of empty space", "mid-distance view"):
+        assert gone not in s, gone
+    assert "do not leave the background as empty white paper" in s
+    # The figure cap is a separate leading clause, not a LOCKED_STYLE tail: buried at the end it
+    # was ignored and the 2026-08-09 probe still returned six-to-eight-figure lineups.
+    cap = FIGURE_CAP.lower()
+    assert "and no one else" in cap and "do not add" in cap
+    for out in (styled_prompt("a scene"), styled_prompt("a scene", use_character_ref=True)):
+        assert FIGURE_CAP in out
+        assert out.index(FIGURE_CAP) < out.index(LOCKED_STYLE)
+
+
+def test_the_mark_vocabulary_is_never_appended_to_an_image_prompt():
+    """Enumerating the marks made the model draw all of them at once, on every frame. The list is
+    the script writer's menu now; the chosen mark arrives inside the scene's own subject."""
+    from studio.style import OVERLAY_LANGUAGE
+
+    for kwargs in ({"shot_type": "character"}, {"shot_type": "concept"},
+                   {"use_character_ref": True}):
+        out = styled_prompt("a scene", **kwargs)
+        assert OVERLAY_LANGUAGE not in out
+        # Even a rule ABOUT marks summons them: the second probe still stamped question marks and
+        # crosses onto frames whose subject asked for none, while LOCKED_STYLE said "draw only the
+        # marks the subject asks for". The style block must not mention marks at all.
+        # Word-boundary: "marker outlines" is the drawing tool, not a diagram mark.
+        for word in ("marks", "arrow", "arrows", "squiggle", "highlight", "cross"):
+            assert not re.search(rf"\b{word}\b", LOCKED_STYLE, re.I), word
 
 
 def test_styled_prompt_appends_the_negative_list_on_every_path():
@@ -93,7 +130,7 @@ def test_thumbnail_prompt_is_completely_the_stickman_style_composed_as_a_thumbna
     out = thumbnail_prompt("a lone figure at a grave")
     assert out.startswith("a lone figure at a grave")
     low = out.lower()
-    assert "no text" in low and "16:9" in low  # title is PIL-added; still text-free + 16:9
+    assert "no letters, words, digits" in low and "16:9" in low  # title is PIL-added
     # COMPLETELY stickman: the FULL video style, the stick-figure guard, AND the Avoid: negatives
     # (so no photoreal / 3D / cinematic background) — same look as the frames.
     assert LOCKED_STYLE in out
@@ -138,14 +175,20 @@ def test_styled_prompt_character_ref_locks_to_one_reference_figure():
     assert "small simple group of white-headed stick people" in wide
 
 
-def test_every_image_prompt_forbids_model_drawn_text():
-    # Strict guardrail: ALL on-screen text is PIL (subtitles + callouts), never drawn by the model.
+def test_every_image_prompt_forbids_glyphs_but_asks_for_marks():
+    """Narrowed 2026-08-09. Letterforms are still refused — the model garbles them and real labels
+    are drawn in post — but arrows and leader lines are now requested, because they are one of the
+    reference's signature devices and the old blanket ban removed them along with the text."""
     from studio import thumbnail_prompt
 
-    for st in ("character", "wide", "concept", "map"):
-        assert "no text" in styled_prompt("a scene", shot_type=st).lower()
-    assert "no text" in styled_prompt("a scene", use_character_ref=True).lower()  # ref path
-    assert "no text" in thumbnail_prompt("a lone figure").lower()  # thumbnail title is PIL-added
+    prompts = [styled_prompt("a scene", shot_type=st) for st in
+               ("character", "wide", "concept", "map")]
+    prompts.append(styled_prompt("a scene", use_character_ref=True))
+    prompts.append(thumbnail_prompt("a lone figure"))
+    for out in prompts:
+        low = out.lower()
+        assert "no letters, words, digits" in low, out[:80]
+        assert "arrows" in low, out[:80]
 
 
 def test_character_shots_force_stick_figures_and_concept_shots_are_people_free():
@@ -805,7 +848,11 @@ def test_script_system_prompt_encodes_tone_and_constraints():
     assert "curiosity" in p and "title" in p  # engaging title
     assert "only facts" in p and "never invent" in p  # no hallucinated citations
     assert "shot_type" in p and "json" in p  # structured output
-    assert "text-free" in p  # images never carry drawn text (diffusion garbles it)
+    # Narrowed 2026-08-09: letterforms are still refused (the model garbles them), but wordless
+    # marks are now asked for -- arrows and highlights are a signature device of the reference.
+    assert "never ask for words in the picture" in p
+    assert "arrows" in p and "wordless marks and symbols are wanted" in p
+    assert "framing" in p  # per-shot camera, the fix for 0.879 layout similarity
     # brainrot-tuned credibility must NOT tip into a lecture — hard anti-academic guardrail
     assert "historiography" in p and "professor" in p  # banned register + "not a professor" rail
     assert "nobody actually agrees" in p  # mystery/debate used as a hook, capped

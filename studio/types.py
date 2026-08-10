@@ -32,6 +32,10 @@ class Scene(BaseModel):
     image_prompt: str  # the subject; the locked style is appended at render time
     motion: str = "static"  # "static" hard-cut (default) or a studio.kenburns.MOTIONS camera move
     shot_type: Literal["character", "wide", "concept", "map"] = "character"  # ref conditioning
+    #: Camera framing (a key of studio.style.FRAMINGS). The script LLM may request one; the final
+    #: value is assigned by ``studio.framing.plan_framings``, which guarantees variety across the
+    #: run rather than trusting the request. Empty means "no request" — the planner decides.
+    framing: str = ""
     cite: tuple[int, ...] = ()  # research-brief [n] indices backing this beat (for the QC gate)
     emphasis: str = ""  # optional short key fact ("1905") shown as an on-image callout overlay
     intense: bool = False  # dramatic/vivid beat → gets an extra distinct frame at render

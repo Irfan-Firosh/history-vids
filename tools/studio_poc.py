@@ -27,6 +27,7 @@ import threading
 import time
 import unicodedata
 import wave
+from collections import Counter
 from collections.abc import Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
@@ -55,6 +56,7 @@ from studio import (  # noqa: E402
     storyboard_from_dict,
     styled_prompt,
 )
+from studio.framing import plan_framings, variation_framing  # noqa: E402
 from studio.run_log import RunSettings, RunStats  # noqa: E402
 from studio.style import LOCKED_STYLE, PALETTE  # noqa: E402
 from studio.voices import resolve_voice  # noqa: E402
@@ -967,6 +969,23 @@ def _frame_name(i: int, k: int) -> str:
     return f"img_{i}.png" if k == 0 else f"img_{i}_{k}.png"
 
 
+def _framings_for(sb) -> list[str]:
+    """The framing plan for a storyboard — one per scene, varied by construction.
+
+    Deterministic, so the pre-flight probe, the main loop and a later single-scene regenerate all
+    compute the same plan without having to pass it between them.
+    """
+    return plan_framings([s.shot_type for s in sb.scenes], [s.framing for s in sb.scenes])
+
+
+def _styled_frame(sc, style: str, refs, framing: str, k: int) -> str:
+    """The full prompt for frame `k` of scene `sc`, at a framing distinct from its siblings."""
+    return styled_prompt(
+        sc.image_prompt, style, use_character_ref=bool(refs), shot_type=sc.shot_type,
+        framing=variation_framing(framing, sc.shot_type, k),
+    )
+
+
 def _frame_prompt(styled: str, k: int) -> str:
     """The prompt for beat frame ``k``. ``k == 0`` is the base image; each extra frame (a "fire
     spot" / intense beat shows two) must be a CLEARLY different shot of the SAME scene so the
@@ -1039,7 +1058,8 @@ def _style_preflight(rec, sb, images: ImageProviders, channel_refs, skip_style_c
             f"style pre-flight: measuring {len(samples)} frame(s) already on disk (no new spend)"
         )
     styled = styled_prompt(
-        sc0.image_prompt, sb.style, use_character_ref=bool(refs), shot_type=sc0.shot_type
+        sc0.image_prompt, sb.style, use_character_ref=bool(refs), shot_type=sc0.shot_type,
+        framing=_framings_for(sb)[0],
     )
     while not on_disk and len(samples) < STYLE_PROBE_FRAMES:
         probe_path = rec.dir / f"style_probe_{len(made)}.png"
@@ -1205,7 +1225,10 @@ def regenerate_scene(
     provider = images.character if is_char else images.concept
     refs = load_channel_refs() if (is_char and wants_refs(provider)) else []
     subject = (prompt_override or sc.image_prompt).strip()
-    styled = styled_prompt(subject, sb.style, use_character_ref=bool(refs), shot_type=sc.shot_type)
+    framing = _framings_for(sb)[scene_index]
+    styled = styled_prompt(
+        subject, sb.style, use_character_ref=bool(refs), shot_type=sc.shot_type, framing=framing
+    )
     edited = " · edited prompt" if prompt_override else ""
     rec.log(f"regenerating scene {scene_index} ({provider.name}) · {n} frame(s){edited}")
     try:
@@ -1342,6 +1365,11 @@ def render_storyboard(
         kept_callouts = {bi: text for text, bi, _s, _e in callout_overlays}
         rec.set_callouts([(text, bi, start) for text, bi, start, _e in callout_overlays])
 
+        # One framing per scene, varied by construction rather than by asking the prompt for
+        # variety (see studio/framing.py for the measurement that motivated this).
+        framings = _framings_for(sb)
+        rec.log(f"framing plan: {Counter(framings).most_common()}")
+
         # Style pre-flight: BEFORE the main image loop below, not after — refuses a run that would
         # otherwise pay for ~200 off-style Agnes images before anyone notices the art has drifted.
         _style_preflight(rec, sb, images, channel_refs, skip_style_check)
@@ -1372,9 +1400,6 @@ def render_storyboard(
                     intense=sc.intense,
                     frame_count=frames_per_beat[i],  # >1 → a fire spot; dashboard shows both frames
                 )
-                styled = styled_prompt(
-                    sc.image_prompt, sb.style, use_character_ref=bool(refs), shot_type=sc.shot_type
-                )
                 n = frames_per_beat[i]
                 rec.log(f"scene {i}: {sc.shot_type} · {dur:.1f}s · {n} fresh frame(s) ({provider.name})")
                 for k in range(n):  # each frame is its own fresh generation (no reuse/repeat)
@@ -1384,8 +1409,9 @@ def render_storyboard(
                     # extra frames of the same beat are a clearly different shot (see _frame_prompt)
                     # so the on-screen switch reads as a real cut, not a near-duplicate.
                     futures[(i, k)] = executor.submit(
-                        _generate_frame, provider, _frame_prompt(styled, k), target, refs, fallback,
-                        rec, i, k, log_lock,
+                        _generate_frame, provider,
+                        _frame_prompt(_styled_frame(sc, sb.style, refs, framings[i], k), k),
+                        target, refs, fallback, rec, i, k, log_lock,
                     )
 
             for i, sc in enumerate(sb.scenes):

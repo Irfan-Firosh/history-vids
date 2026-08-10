@@ -2,10 +2,18 @@
 
 Target look (rebuilt from the local ``assets/refs/frame_*.jpg`` stills): a crude, low-budget
 hand-drawn explainer cartoon. It is not polished illustration. Frames have thick uneven black
-marker outlines, flat fill colors, plain pale backgrounds, simple props, and diagram-like staging.
-Humans are white round-headed stick people with dot eyes and one small line mouth; hair, beards,
-coats, tunics, or fur wraps are simple flat shapes attached to that stick body. Animals, houses,
-maps, bones, fires, snow, furniture, and tools are normal simple cartoons, not stick figures.
+marker outlines and flat fill colors. Humans are white round-headed stick people with dot eyes and
+one small line mouth; hair, beards, coats, tunics, or fur wraps are simple flat shapes attached to
+that stick body. Animals, houses, maps, bones, fires, snow, furniture, and tools are normal simple
+cartoons, not stick figures.
+
+**Rewritten 2026-08-09.** The previous version mandated "plain pale background", "mid-distance
+view" and "lots of empty space", and banned all on-screen marks. Measured against the reference
+frames, all four were wrong: backgrounds there are rich and location-specific, scale ranges from a
+lone tiny figure to a face filling the frame, and arrows, leader lines and colour-coded overlays
+are one of its signature devices. Those clauses produced 0.879 mean pairwise layout similarity
+across a 60-image run with 57% of frames in one horizontal band. Evidence and method:
+``context/research/2026-08-09/01-render-quality-gap.md``.
 
 Consistency across ~60 images/video is the hard part. No image provider (Agnes = OpenAI-compatible;
 Gemini "Nano Banana") exposes a negative-prompt field, so the whole look — positives AND negative
@@ -18,23 +26,85 @@ from __future__ import annotations
 
 #: Appended to every character/wide image prompt so all frames share one look. Tight on purpose —
 #: the refs are crude web-cartoon stills, not refined vector art. KEY: solid wobbly black outlines,
-#: white round heads, noodle stick limbs, flat colors, simple staging, lots of empty background.
+#: white round heads, noodle stick limbs, flat colors, and the REAL location as flat colour blocks.
+#: Framing is deliberately NOT specified here — it varies per shot via :data:`FRAMINGS`.
 LOCKED_STYLE = (
-    "Crude hand-drawn educational web-cartoon frame, like a simple marker drawing from the local "
-    "assets/refs video stills. Thick uneven black outlines, wobbly imperfect linework, flat fill "
-    "colors only, no shading, no gradients, no painterly texture. Plain pale background (white, "
-    "light grey, pale blue, or pale yellow) with one simple flat ground band when needed. Clear "
-    "wide 16:9 staging, mid-distance view, large simple props, lots of empty space, diagram-like "
-    "composition. EVERY human is a simple white round-headed stick person: circular white face, "
-    "tiny black dot eyes, one small black line mouth, optional tiny eyebrows, no nose, no detailed "
-    "face; thin black noodle arms and legs, tiny line hands and feet. Show culture and era only "
-    "with one or two crude flat add-ons on the stick person: shaggy hair, beard, simple tunic, "
-    "blue shirt, robe, fur wrap, coat, boots, hat, or spear. Never draw a realistic body or "
+    "Crude hand-drawn educational web-cartoon frame, like a simple marker drawing. Thick uneven "
+    "black outlines, wobbly imperfect linework, flat fill colors only, no shading, no gradients, "
+    "no painterly texture. Draw ONLY the one place named in the subject above, as flat blocks of "
+    "colour filling the frame — do not add any other location, and do not leave the background as "
+    "empty white paper. Any human drawn is a simple white round-headed stick person: round "
+    "white "
+    "face, tiny black dot eyes, one small black line mouth, optional tiny eyebrows, no nose, no "
+    "detailed face; thin black noodle arms and legs, tiny line hands and feet. Show culture and "
+    "era only with one or two crude flat add-ons: shaggy hair, beard, simple "
+    "tunic, blue shirt, robe, fur wrap, coat, boots, hat, or spear. Never draw a realistic body or "
     "detailed costume. ONLY humans are stick figures; animals, objects, maps, bones, fires, "
     "houses, furniture, snow, and landscapes are normal simple hand-drawn cartoons, not stick "
-    "figures. Use a small flat color palette with simple accent colors; keep the frame "
-    "uncluttered, amateur, rough, funny-looking but still readable, no text"
+    "figures. Keep it amateur, rough, funny-looking but readable"
 )
+
+#: Figure-count cap. Deliberately a SEPARATE clause placed near the front of the prompt rather than
+#: buried at the end of ``LOCKED_STYLE`` — in the 2026-08-09 probe the trailing version was ignored
+#: and frames still came back with six to eight figures in a row.
+FIGURE_CAP = (
+    "CRITICAL: draw exactly the people the subject above names and no one else. Do not add "
+    "bystanders, onlookers, a group, a crowd, or a line of figures in the background"
+)
+
+#: The reference's diagram notation — orange for heat, blue for cold or water, a flat yellow or red
+#: fill on the thing under discussion, arrows pointing at it, a red question mark for an unknown.
+#: Present in roughly a third of sampled reference frames
+#: (``context/research/2026-08-09/01-render-quality-gap.md`` §4b).
+#:
+#: **This is NOT appended to image prompts.** It was, briefly, on 2026-08-09, and the probe came
+#: back with every mark in the list stamped onto every frame: a red question mark, a red cross,
+#: orange squiggles and blue arrows, all six of six images. A model reads an enumeration in a
+#: prompt as a checklist, not a menu. So the vocabulary lives here as the writer's reference — it
+#: is quoted into ``studio.script_prompt``, which asks the script LLM to name AT MOST ONE mark per
+#: beat inside that beat's ``image_prompt``. By the time a prompt reaches the image model, the one
+#: mark that scene wants is part of the subject, and ``LOCKED_STYLE`` says to draw no others.
+OVERLAY_LANGUAGE = (
+    "thin black leader lines and curved arrows pointing at the thing being described; orange "
+    "squiggles and arrows for heat; blue arrows and lines for cold, wind or water; a flat yellow "
+    "or red fill highlighting the single part under discussion; a large red question mark for an "
+    "unknown; a large red cross for something that does not work"
+)
+
+#: Framing directives. The measured failure of the previous style was that NOTHING varied the
+#: camera: 57% of one run's frames put their subject mass in the same horizontal band and mean
+#: pairwise layout similarity was 0.879. Framing is now chosen per shot by
+#: ``studio.framing.plan_framings`` and injected here, so variety is structural rather than a thing
+#: the prompt politely requests.
+FRAMINGS: dict[str, str] = {
+    "close_up": (
+        "EXTREME CLOSE-UP: one head, one pair of hands, or one object fills most of the frame and "
+        "is cropped by the frame edge. No full bodies"
+    ),
+    "medium": (
+        "MEDIUM SHOT: one or two figures seen from roughly the waist up, close enough to read the "
+        "expression, cropped by the bottom edge"
+    ),
+    "wide": (
+        "WIDE ESTABLISHING SHOT: small figures placed low in the frame, the environment filling "
+        "most of the height"
+    ),
+    "detail": (
+        "SINGLE OBJECT: one prop alone in the frame, drawn large and centred, no people at all"
+    ),
+    "cutaway": (
+        "CROSS-SECTION CUTAWAY: the ground, a shelter, a cave or a hut sliced open from the side "
+        "so the inside and its layers are visible"
+    ),
+    "over_shoulder": (
+        "OVER THE SHOULDER: seen from behind and just past one figure, looking at what they are "
+        "looking at. That figure is large, close, and cropped"
+    ),
+    "profile": (
+        "SIDE PROFILE: figures seen from the side, facing each other or facing across the frame, "
+        "staged at clearly different distances from the viewer"
+    ),
+}
 
 #: Concept/map shots (props, symbols, diagrams, geography) must NOT contain a person — and must NOT
 #: sprout faces on objects/continents. They still match the same ``assets/refs`` visual grammar:
@@ -43,8 +113,9 @@ LOCKED_STYLE = (
 CONCEPT_STYLE = (
     "crude hand-drawn educational web-cartoon diagram of objects, props, maps, symbols, or scenery "
     "ONLY; thick uneven black marker outlines, wobbly imperfect linework, flat fill colors only, "
-    "plain pale background, simple ground band if needed, large readable shapes, lots of empty "
-    "space, amateur marker-drawing look matching the local assets/refs stills"
+    "large readable shapes, amateur marker-drawing look. Set the object in its real place — on "
+    "earth, snow, cave floor, water, a worked surface — as flat blocks of colour rather than "
+    "floating on empty white"
 )
 #: Concept/map negative — objects & scenery ONLY. Hardened: people-implying subjects (a "market",
 #: a "battle") and the odd LLM mislabel were still sprouting stick figures into concept shots.
@@ -61,12 +132,25 @@ NO_REALISTIC_HUMANS = (
     "or detailed people, no lifelike faces, no noses, no muscular bodies, no fully-drawn anatomy, "
     "no ornate costume detail"
 )
-#: Strict no-model-text guardrail — ALL on-screen text is added later with PIL (subtitles +
-#: callouts), never drawn by the model (which garbles it). Maximal + on every image-prompt path.
-NO_TEXT = (
-    "absolutely no text, no words, no letters, no numbers, no signs, no labels, no captions, "
-    "no writing, no watermark anywhere in the image"
+#: No GLYPHS from the model — but marks are wanted.
+#:
+#: This used to be a blanket "no text, no signs, no labels, no symbols" on every prompt path. That
+#: was over-drawn. The reference labels things constantly (leader lines onto a seal, a labelled
+#: diagram, a clock face) and arrows are one of its signature devices; banning all of it threw out
+#: the device along with the problem. The real constraint is narrower: image models garble
+#: *letterforms*, not shapes. So glyphs are refused and drawn deterministically in post by the PIL
+#: callout layer (``studio.narration.emphasis_timeline`` -> ``tools.studio_poc``), while arrows,
+#: leader lines, highlight fills and symbols are asked for explicitly.
+NO_WORDS = (
+    "No letters, words, digits, dates, signs, captions, writing or watermark anywhere in the image "
+    "— the model garbles letterforms and every real label is drawn afterwards in post. Wordless "
+    "MARKS are wanted and welcome: arrows, leader lines, highlight fills, question marks, crosses "
+    "and simple symbols"
 )
+
+#: Back-compat alias. Kept because the thumbnail path and older callers still import ``NO_TEXT``;
+#: they get the same narrowed rule.
+NO_TEXT = NO_WORDS
 FRAME = "16:9 wide composition"
 
 #: The user's exact NEGATIVE-prompt list. No image provider (Agnes/Gemini) exposes a negative-prompt
@@ -76,9 +160,13 @@ NEGATIVE_PROMPT = (
     "photorealistic, 3D, Pixar, Disney, anime, manga, hyper detailed, oil painting, watercolor, "
     "cinematic lighting, ultra realistic, AI art, concept art, digital painting, vector "
     "illustration, clean corporate illustration, polished mascot art, professional infographic, "
-    "gradient mesh, HDR, sharp rendering, highly textured, ornate, busy background, complex "
-    "composition, realistic human anatomy, detailed faces, detailed clothing"
+    "gradient mesh, HDR, sharp rendering, highly textured, ornate, realistic human anatomy, "
+    "detailed faces, detailed clothing, a row of figures lined up facing the viewer, "
+    "empty white background"
 )
+# "busy background" and "complex composition" were removed on 2026-08-09: they were suppressing the
+# location-specific environments the reference actually uses. The two clauses added in their place
+# push against the two failures that were measured instead (the lineup, and the white void).
 
 
 def _avoid() -> str:
@@ -145,6 +233,7 @@ def styled_prompt(
     style: str = LOCKED_STYLE,
     use_character_ref: bool = False,
     shot_type: str = "character",
+    framing: str = "",
 ) -> str:
     """Combine a scene's subject with the right per-model guardrail set for its shot.
 
@@ -154,10 +243,15 @@ def styled_prompt(
       SAME character from the reference image" instruction so the figure stays on-model.
     * **concept / map** (no character) — the people-free ``CONCEPT_STYLE`` + ``NO_PEOPLE`` so FLUX
       doesn't draw a stick-figure onto a map or a prop shot.
-    * **character/wide without refs** — the locked character ``style`` + ``NO_TEXT`` (all on-screen
-      text is added later with PIL, never drawn by the model).
+    * **character/wide without refs** — the locked character ``style`` + ``NO_WORDS``.
+
+    ``framing`` is a key of :data:`FRAMINGS` (see ``studio.framing.plan_framings``, which assigns
+    one per shot). It is placed immediately after the subject and before the style block, because
+    the style block is ~250 words and anything appended after it competes with all of them. An
+    unknown or empty ``framing`` simply omits the directive rather than guessing.
     """
     subject = image_prompt.strip().rstrip(".")
+    shot = f" {FRAMINGS[framing]}." if framing in FRAMINGS else ""
     if use_character_ref:
         character_count = (
             "Exactly one white-headed stick person."
@@ -168,15 +262,19 @@ def styled_prompt(
             )
         )
         return (
-            f"{CHARACTER_REF_PREAMBLE}{subject}.{CHARACTER_REF_SUFFIX} {style}. "
-            f"{character_count} {NO_REALISTIC_HUMANS}. {FRAME}, {NO_TEXT}. {_avoid()}"
+            f"{CHARACTER_REF_PREAMBLE}{subject}.{shot} {FIGURE_CAP}.{CHARACTER_REF_SUFFIX} "
+            f"{style}. {character_count} {NO_REALISTIC_HUMANS}. {FRAME}, {NO_WORDS}. "
+            f"{_avoid()}"
         )
     if shot_type in ("concept", "map"):
         return (
             f"An empty scene showing only objects and scenery — absolutely NO people, NO stick "
-            f"figures, NO figures of any kind. {subject}. {CONCEPT_STYLE}. {NO_PEOPLE}, {NO_TEXT}. "
-            f"{FRAME}. {_avoid()}"
+            f"figures, NO figures of any kind. {subject}.{shot} {CONCEPT_STYLE}. "
+            f"{NO_PEOPLE}, {NO_WORDS}. {FRAME}. {_avoid()}"
         )
     # character/wide without refs: locked stick-figure style + the explicit no-realistic / no-photo
     # negative (leading with a long preamble instead pushed ornate subjects to photorealism).
-    return f"{subject}. {style}. {NO_REALISTIC_HUMANS}. {FRAME}, {NO_TEXT}. {_avoid()}"
+    return (
+        f"{subject}.{shot} {FIGURE_CAP}. {style}. {NO_REALISTIC_HUMANS}. "
+        f"{FRAME}, {NO_WORDS}. {_avoid()}"
+    )

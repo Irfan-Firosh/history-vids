@@ -98,6 +98,9 @@ def storyboard_from_dict(data: dict, default_style: str = LOCKED_STYLE) -> Story
                 narration=narration,
                 image_prompt=image_prompt,
                 shot_type=s.get("shot_type") or "character",
+                # A request, not a decision: studio.framing.plan_framings validates it against the
+                # shot type and overrules it when it would extend a monotonous run.
+                framing=(s.get("framing") or "").strip().lower(),
                 cite=cites + tuple(n for n in inline_cites if n not in cites),
                 emphasis=(s.get("emphasis") or "").strip(),
                 intense=bool(s.get("intense", False)),

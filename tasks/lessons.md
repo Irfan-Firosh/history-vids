@@ -348,3 +348,41 @@ after replay):**
 (here: a toy ~150-word "winner" can never cross the 294-word/90-second mark the retention check needs),
 the test fails for a structural reason unrelated to content quality — extend the fixture to a realistic
 length rather than loosening the check it's supposed to exercise.
+
+---
+
+## 2026-08-09 — An enumeration in an image prompt is read as a checklist, not a menu
+
+**What happened.** Rewriting `LOCKED_STYLE` against the reference frames, I listed the seven
+environments the reference uses and the six diagram marks it uses. The very next probe came back
+with **all of them in every frame**: a cave AND a snowfield AND a forest AND a river AND an earth
+cross-section, each stamped with a red `?`, a red `✗`, orange squiggles and blue arrows. Six of six.
+
+Then I did it twice more, one level up each time:
+
+1. Removed the lists but left `"Draw ONLY the marks the subject asks for and no others."`
+   Marks still appeared on frames whose subject requested none — *mentioning* marks summons marks.
+2. Replaced the figure cap with `"…never more than three. When there are two or three, one stands
+   near and large while the others are small…"` Frames came back with two or three people. The
+   clause describing the multi-person case is what produced multiple people.
+
+`LOCKED_STYLE` also said `"EVERY human is a…"` — a plural framing that implies a cast.
+
+**Rule.** In a prompt sent to an image model, treat every noun you write as a request to draw it.
+- Never enumerate options. A list of alternatives is rendered as a conjunction.
+- Never write a rule *about* a thing you do not want. There is no negation strong enough; the noun
+  is what lands. Delete the sentence instead.
+- Prefer singular and definite ("the one place named in the subject") over universal-plural
+  ("every human", "backgrounds").
+- Options belong in the *script writer's* prompt, where one is chosen and named. By the time the
+  image prompt is built, the choice should already be a concrete noun in the subject.
+
+**What actually fixed the composition** was not prompt wording at all: it was giving each shot a
+single named framing from `studio.framing.plan_framings`, and widening the per-scene subject from
+8 words to 20-35 so it names the place and the action. Rounds 1-2 fed the new style the OLD 8-word
+subjects and looked worse than the original — the subject, not the style block, is what carries
+the picture.
+
+**Residual, unfixed after four probe rounds:** Agnes still adds background crowds to a subject that
+says "stands alone". Prompt text has hit diminishing returns here; the next lever is a
+post-generation check or reference conditioning, not more words.
